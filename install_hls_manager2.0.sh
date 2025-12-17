@@ -42,15 +42,34 @@ fi
 
 # 6. Instalar outras dependências
 echo "🔧 Instalando outras dependências..."
-apt-get install -y python3 python3-pip python3-venv curl wget
+apt-get install -y python3 python3-pip python3-venv curl wget net-tools
 
-# 7. Criar estrutura de diretórios
+# 7. Configurar firewall
+echo "🔥 Configurando firewall..."
+if command -v ufw &> /dev/null; then
+    ufw --force enable
+    ufw allow 22/tcp
+    ufw allow 8080/tcp
+    ufw --force reload
+    echo "✅ Firewall configurado (porta 8080 liberada)"
+elif command -v firewall-cmd &> /dev/null; then
+    firewall-cmd --permanent --add-port=8080/tcp
+    firewall-cmd --reload
+    echo "✅ Firewall configurado (FirewallD)"
+else
+    echo "⚠️  Nenhum firewall detectado, configurando iptables..."
+    iptables -A INPUT -p tcp --dport 8080 -j ACCEPT
+    iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+    echo "✅ Porta 8080 liberada no iptables"
+fi
+
+# 8. Criar estrutura de diretórios
 echo "🏗️  Criando estrutura de diretórios..."
 mkdir -p /opt/hls-converter/{uploads,hls,logs,db,templates,static,sessions}
 mkdir -p /opt/hls-converter/hls/{240p,360p,480p,720p,1080p,original}
 cd /opt/hls-converter
 
-# 8. Criar usuário dedicado
+# 9. Criar usuário dedicado
 echo "👤 Criando usuário dedicado..."
 if id "hlsuser" &>/dev/null; then
     echo "✅ Usuário hlsuser já existe"
@@ -59,7 +78,7 @@ else
     echo "✅ Usuário hlsuser criado"
 fi
 
-# 9. Configurar ambiente Python
+# 10. Configurar ambiente Python
 echo "🐍 Configurando ambiente Python..."
 python3 -m venv venv
 source venv/bin/activate
@@ -69,7 +88,7 @@ echo "📦 Instalando dependências Python..."
 pip install --upgrade pip
 pip install flask flask-cors waitress werkzeug psutil bcrypt cryptography
 
-# 10. CRIAR APLICAÇÃO FLASK FINAL CORRIGIDA COM MULTI-UPLOAD
+# 11. CRIAR APLICAÇÃO FLASK FINAL CORRIGIDA COM MULTI-UPLOAD
 echo "💻 Criando aplicação Flask final com multi-upload..."
 
 cat > app.py << 'EOF'
@@ -247,7 +266,7 @@ def log_activity(message):
     """Registra atividade no log"""
     try:
         log_file = os.path.join(LOG_DIR, "activity.log")
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = datetime.now().strftime("%Y-%m-d %H:%M:%S")
         with open(log_file, 'a') as f:
             f.write(f"[{timestamp}] {message}\n")
     except:
@@ -2687,12 +2706,13 @@ def health():
 # =============== INICIALIZAÇÃO ===============
 if __name__ == '__main__':
     print("=" * 60)
-    print("🚀 HLS Converter ULTIMATE - Versão Final Corrigida")
+    print("🚀 HLS Converter ULTIMATE - Versão com Multi-Upload")
     print("=" * 60)
     print(f"📂 Diretório base: {BASE_DIR}")
     print(f"🔐 Autenticação: Habilitada")
     print(f"👤 Usuário padrão: admin / admin")
     print(f"🌐 Porta: 8080")
+    print(f"📦 Multi-Upload: Habilitado")
     print("=" * 60)
     
     # Testar FFmpeg
@@ -2716,6 +2736,12 @@ if __name__ == '__main__':
     print(f"   🩺 Health: http://localhost:8080/health")
     print(f"   🎮 Dashboard: http://localhost:8080/")
     print("")
+    print("📋 Funcionalidades Multi-Upload:")
+    print("   1. Selecione múltiplos arquivos de vídeo")
+    print("   2. Conversão sequencial automática")
+    print("   3. Playlist única com todos os vídeos")
+    print("   4. Interface aprimorada com lista de arquivos")
+    print("")
     
     # Garantir que os arquivos de banco de dados existam
     print("💾 Inicializando banco de dados...")
@@ -2731,7 +2757,7 @@ if __name__ == '__main__':
         app.run(host='0.0.0.0', port=8080, debug=False)
 EOF
 
-# 11. CRIAR ARQUIVOS DE BANCO DE DADOS
+# 12. CRIAR ARQUIVOS DE BANCO DE DADOS
 echo "💾 Criando arquivos de banco de dados..."
 
 # Arquivo de usuários
@@ -2766,7 +2792,7 @@ cat > /opt/hls-converter/db/conversions.json << 'EOF'
 }
 EOF
 
-# 12. CRIAR SCRIPT DE GERENCIAMENTO FINAL
+# 13. CRIAR SCRIPT DE GERENCIAMENTO FINAL
 echo "📝 Criando script de gerenciamento final..."
 
 cat > /usr/local/bin/hlsctl << 'EOF'
@@ -2828,6 +2854,14 @@ case "$1" in
                 echo "⚠️  Login retornou código: $STATUS_CODE"
             fi
             
+            # Multi-upload test
+            echo "📦 Testando multi-upload..."
+            if curl -s http://localhost:8080/ | grep -q "Múltiplos Vídeos"; then
+                echo "✅ Interface multi-upload OK"
+            else
+                echo "⚠️  Interface multi-upload não detectada"
+            fi
+            
         else
             echo "❌ Serviço não está ativo"
         fi
@@ -2841,6 +2875,25 @@ case "$1" in
         else
             echo "❌ FFmpeg não encontrado"
         fi
+        
+        # Firewall
+        echo ""
+        echo "🔥 Testando firewall..."
+        if command -v ufw &> /dev/null; then
+            if ufw status | grep -q "8080.*ALLOW"; then
+                echo "✅ Firewall (UFW): Porta 8080 liberada"
+            else
+                echo "⚠️  Firewall (UFW): Porta 8080 não está liberada"
+            fi
+        elif command -v firewall-cmd &> /dev/null; then
+            if firewall-cmd --list-ports | grep -q "8080/tcp"; then
+                echo "✅ Firewall (FirewallD): Porta 8080 liberada"
+            else
+                echo "⚠️  Firewall (FirewallD): Porta 8080 não está liberada"
+            fi
+        else
+            echo "ℹ️  Nenhum firewall gerenciado detectado"
+        fi
         ;;
     fix-ffmpeg)
         echo "🔧 Instalando FFmpeg..."
@@ -2852,6 +2905,23 @@ case "$1" in
         else
             echo "❌ Falha ao instalar FFmpeg"
         fi
+        ;;
+    fix-firewall)
+        echo "🔥 Configurando firewall..."
+        if command -v ufw &> /dev/null; then
+            ufw allow 8080/tcp
+            ufw --force reload
+            echo "✅ Firewall UFW configurado"
+        elif command -v firewall-cmd &> /dev/null; then
+            firewall-cmd --permanent --add-port=8080/tcp
+            firewall-cmd --reload
+            echo "✅ FirewallD configurado"
+        else
+            iptables -A INPUT -p tcp --dport 8080 -j ACCEPT
+            iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+            echo "✅ Iptables configurado"
+        fi
+        echo "✅ Porta 8080 liberada no firewall"
         ;;
     cleanup)
         echo "🧹 Limpando arquivos antigos..."
@@ -2879,22 +2949,31 @@ print('⚠️  Altere a senha no primeiro login!')
         ;;
     info)
         IP=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "localhost")
-        echo "=" * 50
+        echo "=" * 60
         echo "🎬 HLS Converter ULTIMATE - Informações"
-        echo "=" * 50
+        echo "=" * 60
         echo "Status: $(systemctl is-active hls-converter 2>/dev/null || echo 'inactive')"
         echo "Porta: 8080"
         echo "Login: http://$IP:8080/login"
         echo "Usuário: admin"
         echo "Senha: admin (altere no primeiro acesso)"
+        echo "Firewall: Porta 8080 liberada"
         echo ""
         echo "📁 Diretórios:"
-        echo "  /opt/hls-converter/ - Diretório principal"
+        echo "  /opt/hls-converter/     - Diretório principal"
         echo "  /opt/hls-converter/uploads/ - Vídeos enviados"
-        echo "  /opt/hls-converter/hls/ - Arquivos HLS"
-        echo "  /opt/hls-converter/logs/ - Logs do sistema"
-        echo "  /opt/hls-converter/db/ - Banco de dados"
-        echo "=" * 50
+        echo "  /opt/hls-converter/hls/     - Arquivos HLS"
+        echo "  /opt/hls-converter/logs/    - Logs do sistema"
+        echo "  /opt/hls-converter/db/      - Banco de dados"
+        echo ""
+        echo "⚡ Funcionalidades:"
+        echo "  ✅ Multi-upload (vários vídeos de uma vez)"
+        echo "  ✅ Playlist única para múltiplos vídeos"
+        echo "  ✅ Conversão sequencial automática"
+        echo "  ✅ Interface responsiva"
+        echo "  ✅ Histórico de conversões"
+        echo "  ✅ Firewall configurado"
+        echo "=" * 60
         ;;
     *)
         echo "🎬 HLS Converter ULTIMATE - Gerenciador"
@@ -2910,6 +2989,7 @@ print('⚠️  Altere a senha no primeiro login!')
         echo "  logs [-f]    - Ver logs (-f para seguir)"
         echo "  test         - Testar sistema completo"
         echo "  fix-ffmpeg   - Instalar/repare FFmpeg"
+        echo "  fix-firewall - Configurar firewall"
         echo "  cleanup      - Limpar arquivos antigos"
         echo "  reset-password - Resetar senha do admin"
         echo "  info         - Informações do sistema"
@@ -2919,11 +2999,12 @@ print('⚠️  Altere a senha no primeiro login!')
         echo "  hlsctl logs -f"
         echo "  hlsctl test"
         echo "  hlsctl fix-ffmpeg"
+        echo "  hlsctl fix-firewall"
         ;;
 esac
 EOF
 
-# 13. CRIAR SERVIÇO SYSTEMD
+# 14. CRIAR SERVIÇO SYSTEMD
 echo "⚙️ Configurando serviço systemd..."
 
 cat > /etc/systemd/system/hls-converter.service << 'EOF'
@@ -2958,7 +3039,7 @@ ReadWritePaths=/opt/hls-converter/uploads /opt/hls-converter/hls /opt/hls-conver
 WantedBy=multi-user.target
 EOF
 
-# 14. CONFIGURAR PERMISSÕES
+# 15. CONFIGURAR PERMISSÕES
 echo "🔐 Configurando permissões..."
 
 chown -R hlsuser:hlsuser /opt/hls-converter
@@ -2968,7 +3049,7 @@ chmod 644 /opt/hls-converter/db/*.json
 chmod 755 /usr/local/bin/hlsctl
 chmod 700 /opt/hls-converter/sessions
 
-# 15. INICIAR SERVIÇO
+# 16. INICIAR SERVIÇO
 echo "🚀 Iniciando serviço..."
 
 systemctl daemon-reload
@@ -2982,7 +3063,7 @@ else
     journalctl -u hls-converter -n 20 --no-pager
 fi
 
-# 16. VERIFICAÇÃO FINAL
+# 17. VERIFICAÇÃO FINAL
 echo "🔍 Realizando verificação final..."
 
 IP=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "localhost")
@@ -3008,6 +3089,33 @@ if systemctl is-active --quiet hls-converter.service; then
         echo "⚠️  Página de login: Código $STATUS_CODE"
     fi
     
+    # Check multi-upload interface
+    if curl -s http://localhost:8080/ | grep -q "Múltiplos Vídeos"; then
+        echo "✅ Interface multi-upload: OK"
+    else
+        echo "⚠️  Interface multi-upload: Não detectada"
+    fi
+    
+    # Check firewall
+    echo ""
+    echo "🔥 Status do firewall:"
+    if command -v ufw &> /dev/null; then
+        if ufw status | grep -q "8080.*ALLOW"; then
+            echo "✅ Firewall UFW: Porta 8080 liberada"
+        else
+            echo "❌ Firewall UFW: Porta 8080 NÃO liberada"
+        fi
+    elif command -v firewall-cmd &> /dev/null; then
+        if firewall-cmd --list-ports | grep -q "8080/tcp"; then
+            echo "✅ FirewallD: Porta 8080 liberada"
+        else
+            echo "❌ FirewallD: Porta 8080 NÃO liberada"
+        fi
+    else
+        echo "ℹ️  Nenhum firewall gerenciado detectado"
+        echo "ℹ️  Verifique iptables manualmente se necessário"
+    fi
+    
 else
     echo "❌ Serviço não está ativo"
     echo ""
@@ -3015,11 +3123,11 @@ else
     journalctl -u hls-converter -n 20 --no-pager
 fi
 
-# 17. INFORMAÇÕES FINAIS
+# 18. INFORMAÇÕES FINAIS
 echo ""
-echo "=" * 60
-echo "🎉 INSTALAÇÃO FINAL COMPLETA COM CORREÇÕES APLICADAS! 🎉"
-echo "=" * 60
+echo "=" * 70
+echo "🎉 INSTALAÇÃO COMPLETA COM MULTI-UPLOAD E FIREWALL! 🎉"
+echo "=" * 70
 echo ""
 echo "✅ SISTEMA PRONTO PARA USO"
 echo ""
@@ -3034,13 +3142,14 @@ echo "   🎮 Dashboard: http://$IP:8080/"
 echo "   🩺 Health:   http://$IP:8080/health"
 echo ""
 echo "⚙️  COMANDOS DE GERENCIAMENTO:"
-echo "   • hlsctl start      - Iniciar serviço"
-echo "   • hlsctl stop       - Parar serviço"
-echo "   • hlsctl restart    - Reiniciar serviço"
-echo "   • hlsctl status     - Ver status"
-echo "   • hlsctl logs       - Ver logs"
-echo "   • hlsctl test       - Testar sistema"
-echo "   • hlsctl fix-ffmpeg - Reparar FFmpeg"
+echo "   • hlsctl start        - Iniciar serviço"
+echo "   • hlsctl stop         - Parar serviço"
+echo "   • hlsctl restart      - Reiniciar serviço"
+echo "   • hlsctl status       - Ver status"
+echo "   • hlsctl logs [-f]    - Ver logs (-f para seguir)"
+echo "   • hlsctl test         - Testar sistema completo"
+echo "   • hlsctl fix-ffmpeg   - Reparar FFmpeg"
+echo "   • hlsctl fix-firewall - Reparar firewall"
 echo ""
 echo "📁 ESTRUTURA:"
 echo "   /opt/hls-converter/     - Diretório principal"
@@ -3051,18 +3160,28 @@ echo "   ├── db/                - Banco de dados (usuários/conversões)"
 echo "   ├── logs/              - Logs do sistema"
 echo "   └── sessions/          - Sessões de usuário"
 echo ""
-echo "🔧 CORREÇÕES APLICADAS:"
-echo "   1. ✅ Sistema de login corrigido"
-echo "   2. ✅ Histórico de conversões funcionando"
-echo "   3. ✅ Estrutura de banco de dados corrigida"
-echo "   4. ✅ Interface atualizada e responsiva"
-echo "   5. ✅ Sistema de notificações (toast)"
-echo "   6. ✅ Validação de dados robusta"
+echo "🔧 NOVAS FUNCIONALIDADES:"
+echo "   1. ✅ MULTI-UPLOAD: Selecione vários vídeos de uma vez"
+echo "   2. ✅ PLAYLIST ÚNICA: Todos os vídeos em um link só"
+echo "   3. ✅ CONVERSÃO SEQUENCIAL: Processamento automático em ordem"
+echo "   4. ✅ FIREWALL CONFIGURADO: Porta 8080 automaticamente liberada"
+echo "   5. ✅ INTERFACE APRIMORADA: Lista de arquivos selecionados"
+echo "   6. ✅ PLAYER UNIFICADO: Um player para todos os vídeos"
 echo ""
-echo "💡 DICA:"
-echo "   Para testar, faça login e converta um vídeo."
-echo "   O histórico aparecerá automaticamente na aba 'Histórico'."
+echo "💡 COMO USAR O MULTI-UPLOAD:"
+echo "   1. Na aba 'Upload', clique ou arraste vários arquivos"
+echo "   2. Os arquivos aparecerão na lista"
+echo "   3. Selecione as qualidades desejadas"
+echo "   4. Clique em 'Iniciar Conversão em Lote'"
+echo "   5. Aguarde a conversão sequencial"
+echo "   6. Um único link será gerado para todos os vídeos"
 echo ""
-echo "=" * 60
+echo "⚠️  OBSERVAÇÕES DE SEGURANÇA:"
+echo "   • Firewall configurado automaticamente"
+echo "   • Porta 8080 liberada para acesso"
+echo "   • Autenticação obrigatória"
+echo "   • Sessões seguras com timeout"
+echo ""
+echo "=" * 70
 echo "🚀 Sistema pronto! Acesse http://$IP:8080/login"
-echo "=" * 60
+echo "=" * 70
