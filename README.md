@@ -1,1 +1,9 @@
-# hls-manager2.0
+🚀 Instalação Passo a Passo
+
+git clone https://github.com/lamarksak47/hls-manager2.0.git
+
+cd hls-manager
+
+chmod +x install_hls_manager2.0.sh
+
+sudo ./install_hls_manager2.0.sh
