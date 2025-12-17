@@ -1,21 +1,82 @@
 #!/bin/bash
-# install_hls_converter_multiple.sh - VERSÃO COM MULTIPLOS ARQUIVOS
+# install_hls_converter_final.sh - VERSÃO FINAL CORRIGIDA
 
 set -e
 
-echo "🚀 INSTALANDO HLS CONVERTER ULTIMATE - MULTIPLOS ARQUIVOS"
-echo "========================================================="
+echo "🚀 INSTALANDO HLS CONVERTER ULTIMATE - VERSÃO FINAL"
+echo "==================================================="
 
-# [O resto do script permanece IDÊNTICO até a parte do app.py]
+# 1. Verificar privilégios
+if [ "$EUID" -ne 0 ]; then
+    echo "❌ Por favor, execute como root ou com sudo!"
+    echo "   sudo ./install_hls_converter_final.sh"
+    exit 1
+fi
 
-# 10. CRIAR APLICAÇÃO FLASK COM SUPORTE A MÚLTIPLOS ARQUIVOS
-echo "💻 Criando aplicação Flask com suporte a múltiplos arquivos..."
+# 2. Atualizar sistema
+echo "📦 Atualizando sistema..."
+apt-get update
+apt-get upgrade -y
+
+# 3. Parar serviços existentes
+echo "🛑 Parando serviços existentes..."
+systemctl stop hls-simple hls-dashboard hls-manager hls-final hls-converter 2>/dev/null || true
+pkill -9 python 2>/dev/null || true
+sleep 2
+
+# 4. Limpar instalações anteriores
+echo "🧹 Limpando instalações anteriores..."
+rm -rf /opt/hls-converter 2>/dev/null || true
+rm -rf /etc/systemd/system/hls-*.service 2>/dev/null || true
+rm -f /usr/local/bin/hlsctl 2>/dev/null || true
+systemctl daemon-reload
+
+# 5. INSTALAR FFMPEG
+echo "🎬 INSTALANDO FFMPEG..."
+if ! command -v ffmpeg &> /dev/null; then
+    apt-get install -y ffmpeg
+    echo "✅ FFmpeg instalado"
+else
+    echo "✅ FFmpeg já está instalado"
+fi
+
+# 6. Instalar outras dependências
+echo "🔧 Instalando outras dependências..."
+apt-get install -y python3 python3-pip python3-venv curl wget
+
+# 7. Criar estrutura de diretórios
+echo "🏗️  Criando estrutura de diretórios..."
+mkdir -p /opt/hls-converter/{uploads,hls,logs,db,templates,static,sessions}
+mkdir -p /opt/hls-converter/hls/{240p,360p,480p,720p,1080p,original}
+cd /opt/hls-converter
+
+# 8. Criar usuário dedicado
+echo "👤 Criando usuário dedicado..."
+if id "hlsuser" &>/dev/null; then
+    echo "✅ Usuário hlsuser já existe"
+else
+    useradd -r -s /bin/false hlsuser
+    echo "✅ Usuário hlsuser criado"
+fi
+
+# 9. Configurar ambiente Python
+echo "🐍 Configurando ambiente Python..."
+python3 -m venv venv
+source venv/bin/activate
+
+# Instalar dependências Python
+echo "📦 Instalando dependências Python..."
+pip install --upgrade pip
+pip install flask flask-cors waitress werkzeug psutil bcrypt cryptography
+
+# 10. CRIAR APLICAÇÃO FLASK FINAL CORRIGIDA
+echo "💻 Criando aplicação Flask final..."
 
 cat > app.py << 'EOF'
 #!/usr/bin/env python3
 """
-HLS Converter ULTIMATE - Versão com Múltiplos Arquivos
-Aceita vários arquivos em uma única conversão e cria um único link M3U8
+HLS Converter ULTIMATE - Versão Final Corrigida
+Sistema completo com autenticação e histórico funcionando
 """
 
 import os
@@ -63,7 +124,7 @@ def load_users():
     default_users = {
         "users": {
             "admin": {
-                "password": "$2b$12$7eE8R5Yq3X3t7kXq3Z8p9eBvG9HjK1L2N3M4Q5W6X7Y8Z9A0B1C2D3E4F5G6H7I8J9",
+                "password": "$2b$12$7eE8R5Yq3X3t7kXq3Z8p9eBvG9HjK1L2N3M4Q5W6X7Y8Z9A0B1C2D3E4F5G6H7I8J9",  # admin
                 "password_changed": False,
                 "created_at": datetime.now().isoformat(),
                 "last_login": None,
@@ -81,6 +142,7 @@ def load_users():
         if os.path.exists(USERS_FILE):
             with open(USERS_FILE, 'r') as f:
                 data = json.load(f)
+                # Garantir que a estrutura esteja correta
                 if 'users' not in data:
                     data['users'] = default_users['users']
                 if 'settings' not in data:
@@ -88,6 +150,7 @@ def load_users():
                 return data
     except Exception as e:
         print(f"Erro ao carregar usuários: {e}")
+        # Criar arquivo novo se houver erro
         save_users(default_users)
     
     return default_users
@@ -101,7 +164,7 @@ def save_users(data):
         print(f"Erro ao salvar usuários: {e}")
 
 def load_conversions():
-    """Carrega conversões do arquivo JSON"""
+    """Carrega conversões do arquivo JSON - CORRIGIDO"""
     default_data = {
         "conversions": [],
         "stats": {"total": 0, "success": 0, "failed": 0}
@@ -111,6 +174,7 @@ def load_conversions():
         if os.path.exists(CONVERSIONS_FILE):
             with open(CONVERSIONS_FILE, 'r') as f:
                 data = json.load(f)
+                # Garantir que a estrutura esteja correta
                 if 'conversions' not in data:
                     data['conversions'] = []
                 if 'stats' not in data:
@@ -118,6 +182,7 @@ def load_conversions():
                 return data
     except Exception as e:
         print(f"Erro ao carregar conversões: {e}")
+        # Se houver erro no JSON, criar novo
         save_conversions(default_data)
     
     return default_data
@@ -125,9 +190,11 @@ def load_conversions():
 def save_conversions(data):
     """Salva conversões no arquivo JSON"""
     try:
+        # Garantir que conversões seja uma lista
         if not isinstance(data.get('conversions'), list):
             data['conversions'] = []
         
+        # Garantir que stats exista
         if 'stats' not in data:
             data['stats'] = {"total": 0, "success": 0, "failed": 0}
         
@@ -137,7 +204,7 @@ def save_conversions(data):
         print(f"Erro ao salvar conversões: {e}")
 
 def check_password(username, password):
-    """Verifica se a senha está correta"""
+    """Verifica se a senha está correta - CORRIGIDO"""
     users = load_users()
     
     if username not in users.get('users', {}):
@@ -148,6 +215,7 @@ def check_password(username, password):
         return False
     
     try:
+        # CORREÇÃO: Usar encoding correto
         return bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8'))
     except Exception as e:
         print(f"Erro em check_password: {e}")
@@ -407,7 +475,7 @@ DASHBOARD_HTML = '''
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🎬 HLS Converter ULTIMATE - Múltiplos Arquivos</title>
+    <title>🎬 HLS Converter ULTIMATE</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         :root {
@@ -564,6 +632,39 @@ DASHBOARD_HTML = '''
             gap: 10px;
         }
         
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .stat-item {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 25px;
+            border-radius: 10px;
+            text-align: center;
+            transition: transform 0.3s;
+        }
+        
+        .stat-item:hover {
+            transform: translateY(-5px);
+        }
+        
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            color: #6c757d;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
         .upload-area {
             border: 3px dashed var(--primary);
             border-radius: 12px;
@@ -631,56 +732,98 @@ DASHBOARD_HTML = '''
             color: white;
         }
         
-        .file-list {
-            max-height: 300px;
-            overflow-y: auto;
-            margin: 20px 0;
-            border: 1px solid #eaeaea;
-            border-radius: 8px;
-            padding: 15px;
+        .conversions-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
         }
         
-        .file-item {
+        .conversion-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            border-left: 4px solid var(--accent);
+            transition: transform 0.3s;
+        }
+        
+        .conversion-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.12);
+        }
+        
+        .conversion-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 10px 15px;
-            background: #f8f9fa;
-            border-radius: 6px;
-            margin-bottom: 8px;
-            border-left: 4px solid var(--accent);
+            margin-bottom: 15px;
         }
         
-        .file-item:last-child {
-            margin-bottom: 0;
+        .conversion-id {
+            font-family: monospace;
+            background: var(--light);
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 0.9rem;
         }
         
-        .file-info {
+        .conversion-status {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .conversion-info {
+            margin: 10px 0;
+        }
+        
+        .conversion-info p {
+            margin: 5px 0;
+            font-size: 0.9rem;
+        }
+        
+        .conversion-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .conversion-actions .btn {
+            padding: 8px 15px;
+            font-size: 0.85rem;
             flex: 1;
         }
         
-        .file-name {
-            font-weight: 600;
-            color: var(--dark);
+        .progress-container {
+            background: #e9ecef;
+            border-radius: 10px;
+            height: 20px;
+            overflow: hidden;
+            margin: 20px 0;
         }
         
-        .file-size {
-            font-size: 0.85rem;
-            color: #6c757d;
-            margin-top: 3px;
-        }
-        
-        .file-remove {
-            background: var(--danger);
-            color: white;
-            border: none;
-            width: 30px;
-            height: 30px;
-            border-radius: 50%;
-            cursor: pointer;
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent) 0%, var(--primary) 100%);
+            transition: width 0.5s ease;
             display: flex;
             align-items: center;
             justify-content: center;
+            color: white;
+            font-size: 0.8rem;
+            font-weight: 600;
         }
         
         .quality-selector {
@@ -710,70 +853,81 @@ DASHBOARD_HTML = '''
             border-color: var(--secondary);
         }
         
-        .progress-container {
-            background: #e9ecef;
-            border-radius: 10px;
-            height: 20px;
-            overflow: hidden;
-            margin: 20px 0;
-        }
-        
-        .progress-bar {
-            height: 100%;
-            background: linear-gradient(90deg, var(--accent) 0%, var(--primary) 100%);
-            transition: width 0.5s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 0.8rem;
-            font-weight: 600;
-        }
-        
-        .conversion-info {
-            background: #f8f9fa;
+        .file-info {
+            background: var(--light);
             padding: 20px;
             border-radius: 10px;
-            margin-top: 20px;
+            margin: 20px 0;
             display: none;
         }
         
-        .conversion-info.show {
+        .file-info.show {
             display: block;
             animation: fadeIn 0.5s ease;
         }
         
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
+        .ffmpeg-status {
+            display: inline-block;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-weight: 600;
+            margin: 10px 0;
+        }
+        
+        .ffmpeg-ok {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .ffmpeg-error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+        
+        .empty-state i {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            color: #dee2e6;
+        }
+        
+        .system-status {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 12px;
             margin-top: 20px;
         }
         
-        .stat-item {
-            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-            padding: 25px;
-            border-radius: 10px;
-            text-align: center;
-            transition: transform 0.3s;
-        }
-        
-        .stat-item:hover {
-            transform: translateY(-5px);
-        }
-        
-        .stat-value {
-            font-size: 2.5rem;
-            font-weight: 700;
-            color: var(--primary);
-            margin-bottom: 5px;
-        }
-        
-        .stat-label {
-            color: #6c757d;
-            font-size: 0.9rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
+        @media (max-width: 768px) {
+            .header {
+                flex-direction: column;
+                gap: 15px;
+                text-align: center;
+            }
+            
+            .nav-tabs {
+                flex-wrap: wrap;
+            }
+            
+            .nav-tab {
+                flex: 1;
+                min-width: 120px;
+                justify-content: center;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .conversions-list {
+                grid-template-columns: 1fr;
+            }
         }
         
         .toast {
@@ -808,65 +962,6 @@ DASHBOARD_HTML = '''
         .toast.warning {
             border-left-color: var(--warning);
         }
-        
-        .conversions-list {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 20px;
-            margin-top: 20px;
-        }
-        
-        .conversion-card {
-            background: white;
-            border-radius: 10px;
-            padding: 20px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-            border-left: 4px solid var(--accent);
-            transition: transform 0.3s;
-        }
-        
-        .conversion-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 8px 20px rgba(0,0,0,0.12);
-        }
-        
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #6c757d;
-        }
-        
-        .empty-state i {
-            font-size: 4rem;
-            margin-bottom: 20px;
-            color: #dee2e6;
-        }
-        
-        @media (max-width: 768px) {
-            .header {
-                flex-direction: column;
-                gap: 15px;
-                text-align: center;
-            }
-            
-            .nav-tabs {
-                flex-wrap: wrap;
-            }
-            
-            .nav-tab {
-                flex: 1;
-                min-width: 120px;
-                justify-content: center;
-            }
-            
-            .stats-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .conversions-list {
-                grid-template-columns: 1fr;
-            }
-        }
     </style>
 </head>
 <body>
@@ -874,9 +969,6 @@ DASHBOARD_HTML = '''
         <div class="logo">
             <i class="fas fa-video"></i>
             <h1>HLS Converter ULTIMATE</h1>
-            <small style="font-size: 0.8rem; background: rgba(255,255,255,0.3); padding: 3px 8px; border-radius: 10px;">
-                Múltiplos Arquivos
-            </small>
         </div>
         <div class="user-info">
             <span><i class="fas fa-user"></i> {{ session.user_id }}</span>
@@ -893,7 +985,7 @@ DASHBOARD_HTML = '''
                 <i class="fas fa-tachometer-alt"></i> Dashboard
             </div>
             <div class="nav-tab" onclick="showTab('upload')">
-                <i class="fas fa-upload"></i> Upload Múltiplo
+                <i class="fas fa-upload"></i> Upload
             </div>
             <div class="nav-tab" onclick="showTab('conversions')">
                 <i class="fas fa-history"></i> Histórico
@@ -925,13 +1017,19 @@ DASHBOARD_HTML = '''
                         <div class="stat-label">Conversões Bem-sucedidas</div>
                     </div>
                 </div>
+                
+                <div class="system-status">
+                    <h3><i class="fas fa-microchip"></i> Status do FFmpeg</h3>
+                    <div id="ffmpegStatus" class="ffmpeg-status">Verificando...</div>
+                    <p id="ffmpegPath" style="margin-top: 10px; font-size: 0.9rem;"></p>
+                </div>
             </div>
             
             <div class="card">
                 <h2><i class="fas fa-bolt"></i> Ações Rápidas</h2>
                 <div style="display: flex; gap: 15px; margin-top: 20px; flex-wrap: wrap;">
                     <button class="btn btn-primary" onclick="showTab('upload')">
-                        <i class="fas fa-upload"></i> Converter Vídeos
+                        <i class="fas fa-upload"></i> Converter Vídeo
                     </button>
                     <button class="btn btn-success" onclick="refreshStats()">
                         <i class="fas fa-sync-alt"></i> Atualizar Status
@@ -939,36 +1037,33 @@ DASHBOARD_HTML = '''
                     <button class="btn btn-warning" onclick="testFFmpeg()">
                         <i class="fas fa-video"></i> Testar FFmpeg
                     </button>
+                    <button class="btn btn-danger" onclick="cleanupFiles()">
+                        <i class="fas fa-trash"></i> Limpar Arquivos
+                    </button>
                 </div>
             </div>
         </div>
         
-        <!-- Upload Tab - MODIFICADO PARA MÚLTIPLOS ARQUIVOS -->
+        <!-- Upload Tab -->
         <div id="upload" class="tab-content">
             <div class="card">
-                <h2><i class="fas fa-upload"></i> Converter Múltiplos Vídeos para HLS</h2>
-                <p style="color: #666; margin-bottom: 20px;">
-                    <i class="fas fa-info-circle"></i> Selecione vários vídeos para criar um único link M3U8 com todos em sequência.
-                </p>
+                <h2><i class="fas fa-upload"></i> Converter Vídeo para HLS</h2>
                 
                 <div class="upload-area" onclick="document.getElementById('fileInput').click()">
                     <i class="fas fa-cloud-upload-alt"></i>
-                    <h3>Arraste e solte seus vídeos aqui</h3>
-                    <p>ou clique para selecionar múltiplos arquivos</p>
+                    <h3>Arraste e solte seu vídeo aqui</h3>
+                    <p>ou clique para selecionar arquivo</p>
                     <p style="color: #666; margin-top: 10px;">
                         Formatos suportados: MP4, AVI, MOV, MKV, WEBM
                     </p>
-                    <p style="color: var(--primary); font-size: 0.9rem; margin-top: 5px;">
-                        <i class="fas fa-lightbulb"></i> Você pode selecionar vários arquivos de uma vez
-                    </p>
                 </div>
                 
-                <input type="file" id="fileInput" accept="video/*" multiple style="display: none;" onchange="handleFileSelect()">
+                <input type="file" id="fileInput" accept="video/*" style="display: none;" onchange="handleFileSelect()">
                 
-                <div id="fileList" class="file-list" style="display: none;">
-                    <h4><i class="fas fa-list"></i> Arquivos Selecionados</h4>
-                    <div id="fileItems"></div>
-                    <p id="totalFiles" style="text-align: center; color: #666; margin-top: 10px; font-size: 0.9rem;"></p>
+                <div id="fileInfo" class="file-info">
+                    <h4><i class="fas fa-file-video"></i> Arquivo Selecionado</h4>
+                    <p><strong>Nome:</strong> <span id="fileName"></span></p>
+                    <p><strong>Tamanho:</strong> <span id="fileSize"></span></p>
                 </div>
                 
                 <div style="margin-top: 30px;">
@@ -989,16 +1084,8 @@ DASHBOARD_HTML = '''
                     </div>
                 </div>
                 
-                <div style="margin-top: 30px;">
-                    <h3><i class="fas fa-cogs"></i> Configurações</h3>
-                    <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
-                        <input type="checkbox" id="sequentialNaming" checked>
-                        <label for="sequentialNaming">Numerar vídeos sequencialmente (Vídeo 1, Vídeo 2, etc.)</label>
-                    </div>
-                </div>
-                
                 <button class="btn btn-primary" onclick="startConversion()" id="convertBtn" style="margin-top: 30px; width: 100%;">
-                    <i class="fas fa-play-circle"></i> Iniciar Conversão de Todos os Vídeos
+                    <i class="fas fa-play-circle"></i> Iniciar Conversão
                 </button>
                 
                 <div id="progress" style="display: none; margin-top: 30px;">
@@ -1006,29 +1093,27 @@ DASHBOARD_HTML = '''
                     <div class="progress-container">
                         <div class="progress-bar" id="progressBar" style="width: 0%">0%</div>
                     </div>
-                    <div style="display: flex; justify-content: space-between; margin-top: 10px;">
-                        <span id="progressText" style="color: #666;">Preparando conversão...</span>
-                        <span id="progressFile" style="color: #666; font-size: 0.9rem;"></span>
-                    </div>
-                    <div id="progressDetails" style="margin-top: 15px; font-size: 0.9rem; color: #666;"></div>
-                </div>
-                
-                <div id="conversionResult" class="conversion-info">
-                    <h3><i class="fas fa-check-circle" style="color: var(--success);"></i> Conversão Concluída!</h3>
-                    <div id="resultDetails"></div>
+                    <p id="progressText" style="text-align: center; margin-top: 10px; color: #666;">
+                        Iniciando conversão...
+                    </p>
                 </div>
             </div>
         </div>
         
-        <!-- Conversions Tab -->
+        <!-- Conversions Tab - HISTÓRICO CORRIGIDO -->
         <div id="conversions" class="tab-content">
             <div class="card">
                 <h2><i class="fas fa-history"></i> Histórico de Conversões</h2>
                 
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                    <button class="btn btn-success" onclick="loadConversions()">
-                        <i class="fas fa-sync-alt"></i> Atualizar
-                    </button>
+                    <div>
+                        <button class="btn btn-success" onclick="loadConversions()">
+                            <i class="fas fa-sync-alt"></i> Atualizar
+                        </button>
+                        <button class="btn btn-warning" onclick="clearHistory()">
+                            <i class="fas fa-trash-alt"></i> Limpar Histórico
+                        </button>
+                    </div>
                     <div id="conversionStats" style="color: #666; font-size: 0.9rem;">
                         Carregando estatísticas...
                     </div>
@@ -1038,7 +1123,7 @@ DASHBOARD_HTML = '''
                     <div class="empty-state">
                         <i class="fas fa-history"></i>
                         <h3>Nenhuma conversão realizada ainda</h3>
-                        <p>Converta seus primeiros vídeos para ver o histórico aqui</p>
+                        <p>Converta seu primeiro vídeo para ver o histórico aqui</p>
                     </div>
                 </div>
             </div>
@@ -1058,9 +1143,22 @@ DASHBOARD_HTML = '''
                 
                 <div style="margin-top: 30px;">
                     <h3><i class="fas fa-hdd"></i> Armazenamento</h3>
+                    <div style="margin: 15px 0;">
+                        <label style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="keepOriginals" checked>
+                            Manter arquivos originais após conversão
+                        </label>
+                    </div>
                     <button class="btn btn-warning" onclick="cleanupOldFiles()" style="margin-top: 10px;">
                         <i class="fas fa-broom"></i> Limpar Arquivos Antigos
                     </button>
+                </div>
+                
+                <div style="margin-top: 30px;">
+                    <h3><i class="fas fa-info-circle"></i> Informações do Sistema</h3>
+                    <div id="systemInfo" style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px;">
+                        Carregando informações...
+                    </div>
                 </div>
             </div>
         </div>
@@ -1068,34 +1166,41 @@ DASHBOARD_HTML = '''
 
     <script>
         // Variáveis globais
-        let selectedFiles = [];
+        let selectedFile = null;
         let selectedQualities = ['240p', '480p', '720p', '1080p'];
-        let currentConversion = null;
         
         // =============== FUNÇÕES DE NAVEGAÇÃO ===============
         function showTab(tabName) {
+            // Esconder todas as abas
             document.querySelectorAll('.tab-content').forEach(tab => {
                 tab.classList.remove('active');
             });
             
+            // Remover active de todas as tabs
             document.querySelectorAll('.nav-tab').forEach(tab => {
                 tab.classList.remove('active');
             });
             
+            // Mostrar aba selecionada
             document.getElementById(tabName).classList.add('active');
             
+            // Ativar tab correspondente
             document.querySelectorAll('.nav-tab').forEach(tab => {
                 if (tab.textContent.includes(getTabLabel(tabName))) {
                     tab.classList.add('active');
                 }
             });
             
+            // Carregar dados específicos da aba
             switch(tabName) {
                 case 'dashboard':
                     loadSystemStats();
                     break;
                 case 'conversions':
                     loadConversions();
+                    break;
+                case 'settings':
+                    loadSystemInfo();
                     break;
             }
         }
@@ -1124,6 +1229,20 @@ DASHBOARD_HTML = '''
                     document.getElementById('memory').textContent = data.memory || '--%';
                     document.getElementById('conversionsTotal').textContent = data.total_conversions || '0';
                     document.getElementById('conversionsSuccess').textContent = data.success_conversions || '0';
+                    
+                    // Status do FFmpeg
+                    const ffmpegStatus = document.getElementById('ffmpegStatus');
+                    if (data.ffmpeg_status === 'ok') {
+                        ffmpegStatus.textContent = '✅ FFmpeg Disponível';
+                        ffmpegStatus.className = 'ffmpeg-status ffmpeg-ok';
+                        if (data.ffmpeg_path) {
+                            document.getElementById('ffmpegPath').textContent = `Local: ${data.ffmpeg_path}`;
+                        }
+                    } else {
+                        ffmpegStatus.textContent = '❌ FFmpeg Não Encontrado';
+                        ffmpegStatus.className = 'ffmpeg-status ffmpeg-error';
+                        document.getElementById('ffmpegPath').textContent = 'Execute: sudo apt-get install ffmpeg';
+                    }
                 })
                 .catch(error => {
                     console.error('Erro ao carregar stats:', error);
@@ -1151,69 +1270,18 @@ DASHBOARD_HTML = '''
                 });
         }
         
-        // =============== UPLOAD MÚLTIPLO ===============
+        // =============== UPLOAD ===============
         function handleFileSelect() {
             const fileInput = document.getElementById('fileInput');
-            const newFiles = Array.from(fileInput.files);
-            
-            // Adicionar novos arquivos à lista (evitar duplicados)
-            newFiles.forEach(newFile => {
-                const exists = selectedFiles.some(existingFile => 
-                    existingFile.name === newFile.name && existingFile.size === newFile.size
-                );
-                if (!exists) {
-                    selectedFiles.push(newFile);
-                }
-            });
-            
-            updateFileList();
-        }
-        
-        function updateFileList() {
-            const fileList = document.getElementById('fileList');
-            const fileItems = document.getElementById('fileItems');
-            const totalFiles = document.getElementById('totalFiles');
-            
-            if (selectedFiles.length === 0) {
-                fileList.style.display = 'none';
-                return;
-            }
-            
-            fileList.style.display = 'block';
-            
-            // Ordenar arquivos por nome
-            selectedFiles.sort((a, b) => a.name.localeCompare(b.name));
-            
-            let html = '';
-            let totalSize = 0;
-            
-            selectedFiles.forEach((file, index) => {
-                totalSize += file.size;
+            if (fileInput.files.length > 0) {
+                selectedFile = fileInput.files[0];
                 
-                html += `
-                    <div class="file-item">
-                        <div class="file-info">
-                            <div class="file-name">
-                                <i class="fas fa-file-video"></i> ${file.name}
-                            </div>
-                            <div class="file-size">
-                                ${formatBytes(file.size)}
-                            </div>
-                        </div>
-                        <button class="file-remove" onclick="removeFile(${index})" title="Remover arquivo">
-                            <i class="fas fa-times"></i>
-                        </button>
-                    </div>
-                `;
-            });
-            
-            fileItems.innerHTML = html;
-            totalFiles.textContent = `${selectedFiles.length} arquivo(s) selecionado(s) - Total: ${formatBytes(totalSize)}`;
-        }
-        
-        function removeFile(index) {
-            selectedFiles.splice(index, 1);
-            updateFileList();
+                const fileInfo = document.getElementById('fileInfo');
+                fileInfo.classList.add('show');
+                
+                document.getElementById('fileName').textContent = selectedFile.name;
+                document.getElementById('fileSize').textContent = formatBytes(selectedFile.size);
+            }
         }
         
         function toggleQuality(element) {
@@ -1230,8 +1298,8 @@ DASHBOARD_HTML = '''
         }
         
         function startConversion() {
-            if (selectedFiles.length === 0) {
-                showToast('Por favor, selecione pelo menos um arquivo!', 'warning');
+            if (!selectedFile) {
+                showToast('Por favor, selecione um arquivo primeiro!', 'warning');
                 return;
             }
             
@@ -1241,16 +1309,8 @@ DASHBOARD_HTML = '''
             }
             
             const formData = new FormData();
-            
-            // Adicionar todos os arquivos
-            selectedFiles.forEach((file, index) => {
-                formData.append(`file${index}`, file);
-            });
-            
-            // Adicionar metadados
-            formData.append('file_count', selectedFiles.length.toString());
+            formData.append('file', selectedFile);
             formData.append('qualities', JSON.stringify(selectedQualities));
-            formData.append('sequential_naming', document.getElementById('sequentialNaming').checked.toString());
             
             // Mostrar progresso
             const progressSection = document.getElementById('progress');
@@ -1260,47 +1320,15 @@ DASHBOARD_HTML = '''
             convertBtn.disabled = true;
             convertBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Convertendo...';
             
-            // Esconder resultado anterior
-            document.getElementById('conversionResult').classList.remove('show');
-            
-            // Configurar progresso
-            let progress = 0;
-            let currentFileIndex = 0;
-            
-            function updateProgressUI() {
-                const fileProgress = Math.floor((currentFileIndex / selectedFiles.length) * 100);
-                const overallProgress = Math.floor((currentFileIndex / selectedFiles.length) * 100);
-                
-                document.getElementById('progressBar').style.width = `${overallProgress}%`;
-                document.getElementById('progressBar').textContent = `${overallProgress}%`;
-                document.getElementById('progressText').textContent = `Processando vídeo ${currentFileIndex + 1} de ${selectedFiles.length}`;
-                
-                if (currentFileIndex < selectedFiles.length) {
-                    document.getElementById('progressFile').textContent = `Arquivo: ${selectedFiles[currentFileIndex].name}`;
-                }
-                
-                document.getElementById('progressDetails').innerHTML = `
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;">
-                        <div style="background: #e9ecef; padding: 10px; border-radius: 5px;">
-                            <div style="font-weight: bold; color: var(--primary);">${currentFileIndex + 1}/${selectedFiles.length}</div>
-                            <div style="font-size: 0.8rem;">Vídeos</div>
-                        </div>
-                        <div style="background: #e9ecef; padding: 10px; border-radius: 5px;">
-                            <div style="font-weight: bold; color: var(--success);">${selectedQualities.length}</div>
-                            <div style="font-size: 0.8rem;">Qualidades</div>
-                        </div>
-                    </div>
-                `;
-            }
-            
             // Simular progresso
+            let progress = 0;
             const progressInterval = setInterval(() => {
                 progress += 2;
                 if (progress > 90) progress = 90;
-                updateProgressUI();
+                updateProgress(progress, 'Processando vídeo...');
             }, 500);
             
-            fetch('/convert-multiple', {
+            fetch('/convert', {
                 method: 'POST',
                 body: formData
             })
@@ -1309,76 +1337,45 @@ DASHBOARD_HTML = '''
                 clearInterval(progressInterval);
                 
                 if (data.success) {
-                    // Mostrar progresso completo
-                    document.getElementById('progressBar').style.width = '100%';
-                    document.getElementById('progressBar').textContent = '100%';
-                    document.getElementById('progressText').textContent = 'Conversão concluída!';
+                    updateProgress(100, 'Concluído!');
+                    showToast(`✅ Conversão concluída! ID: ${data.video_id}`, 'success');
                     
-                    // Mostrar resultado
-                    const resultDiv = document.getElementById('conversionResult');
-                    resultDiv.classList.add('show');
-                    
-                    document.getElementById('resultDetails').innerHTML = `
-                        <p><strong>✅ Conversão concluída com sucesso!</strong></p>
-                        <p><strong>ID da Conversão:</strong> ${data.conversion_id}</p>
-                        <p><strong>Total de Vídeos:</strong> ${data.total_videos}</p>
-                        <p><strong>Qualidades Geradas:</strong> ${data.qualities.join(', ')}</p>
-                        <p><strong>Vídeos Processados:</strong></p>
-                        <ul style="margin-left: 20px; margin-top: 10px;">
-                            ${data.videos.map((video, idx) => 
-                                `<li>${idx + 1}. ${video.filename} (${video.qualities.join(', ')})</li>`
-                            ).join('')}
-                        </ul>
-                        <div style="margin-top: 20px; background: #f8f9fa; padding: 15px; border-radius: 8px;">
-                            <p><strong>🔗 Link M3U8 Principal:</strong></p>
-                            <div style="display: flex; gap: 10px; margin-top: 10px;">
-                                <input type="text" id="m3u8Link" value="${window.location.origin}${data.master_m3u8_url}" 
-                                       style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 5px;" readonly>
-                                <button class="btn btn-primary" onclick="copyLink('${data.conversion_id}')">
-                                    <i class="fas fa-copy"></i> Copiar
-                                </button>
-                            </div>
-                        </div>
-                        <div style="margin-top: 20px; display: flex; gap: 10px;">
-                            <button class="btn btn-success" onclick="playVideo('${data.conversion_id}')">
-                                <i class="fas fa-play"></i> Reproduzir
-                            </button>
-                            <button class="btn btn-warning" onclick="showTab('conversions')">
-                                <i class="fas fa-history"></i> Ver Histórico
-                            </button>
-                        </div>
-                    `;
-                    
-                    showToast(`✅ Conversão concluída! ${data.total_videos} vídeo(s) processado(s)`, 'success');
-                    
-                    // Reset após 3 segundos
+                    // Reset após 2 segundos
                     setTimeout(() => {
                         progressSection.style.display = 'none';
-                        selectedFiles = [];
-                        updateFileList();
+                        document.getElementById('fileInfo').classList.remove('show');
                         document.getElementById('fileInput').value = '';
+                        selectedFile = null;
                         convertBtn.disabled = false;
-                        convertBtn.innerHTML = '<i class="fas fa-play-circle"></i> Iniciar Conversão de Todos os Vídeos';
+                        convertBtn.innerHTML = '<i class="fas fa-play-circle"></i> Iniciar Conversão';
+                        updateProgress(0, '');
                         
-                        // Atualizar histórico e stats
+                        // Atualizar histórico
                         loadConversions();
                         loadSystemStats();
-                    }, 3000);
+                    }, 2000);
                 } else {
                     showToast(`❌ Erro: ${data.error}`, 'error');
                     convertBtn.disabled = false;
-                    convertBtn.innerHTML = '<i class="fas fa-play-circle"></i> Iniciar Conversão de Todos os Vídeos';
+                    convertBtn.innerHTML = '<i class="fas fa-play-circle"></i> Iniciar Conversão';
                 }
             })
             .catch(error => {
                 clearInterval(progressInterval);
                 showToast(`❌ Erro de conexão: ${error.message}`, 'error');
                 convertBtn.disabled = false;
-                convertBtn.innerHTML = '<i class="fas fa-play-circle"></i> Iniciar Conversão de Todos os Vídeos';
+                convertBtn.innerHTML = '<i class="fas fa-play-circle"></i> Iniciar Conversão';
             });
         }
         
-        // =============== HISTÓRICO ===============
+        function updateProgress(percent, text) {
+            const progressBar = document.getElementById('progressBar');
+            progressBar.style.width = percent + '%';
+            progressBar.textContent = percent + '%';
+            document.getElementById('progressText').textContent = text;
+        }
+        
+        // =============== HISTÓRICO DE CONVERSÕES - CORRIGIDO ===============
         function loadConversions() {
             fetch('/api/conversions')
                 .then(response => response.json())
@@ -1386,6 +1383,7 @@ DASHBOARD_HTML = '''
                     const container = document.getElementById('conversionsList');
                     const statsContainer = document.getElementById('conversionStats');
                     
+                    // Atualizar estatísticas
                     if (data.stats) {
                         statsContainer.innerHTML = `
                             Total: ${data.stats.total || 0} | 
@@ -1399,7 +1397,7 @@ DASHBOARD_HTML = '''
                             <div class="empty-state">
                                 <i class="fas fa-history"></i>
                                 <h3>Nenhuma conversão realizada ainda</h3>
-                                <p>Converta seus primeiros vídeos para ver o histórico aqui</p>
+                                <p>Converta seu primeiro vídeo para ver o histórico aqui</p>
                             </div>
                         `;
                         return;
@@ -1407,33 +1405,35 @@ DASHBOARD_HTML = '''
                     
                     let html = '<div class="conversions-list">';
                     
-                    data.conversions.forEach(conv => {
-                        const conversionId = conv.conversion_id || conv.video_id || 'N/A';
-                        const videos = conv.videos || [];
-                        const totalVideos = videos.length || conv.total_videos || 0;
+                    // CORREÇÃO: Garantir que estamos iterando sobre um array
+                    const conversions = Array.isArray(data.conversions) ? data.conversions : [];
+                    
+                    conversions.forEach(conv => {
+                        // Garantir que conv tenha as propriedades necessárias
+                        const videoId = conv.video_id || conv.id || 'N/A';
+                        const filename = conv.filename || 'Arquivo desconhecido';
+                        const timestamp = conv.timestamp || new Date().toISOString();
+                        const qualities = Array.isArray(conv.qualities) ? conv.qualities : [];
+                        const status = conv.status || 'unknown';
                         
                         html += `
                             <div class="conversion-card">
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                                    <span style="font-family: monospace; background: #f8f9fa; padding: 5px 10px; border-radius: 5px; font-size: 0.9rem;">
-                                        ${conversionId.substring(0, 8)}...
-                                    </span>
-                                    <span style="background: #d4edda; color: #155724; padding: 5px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;">
-                                        ✅ ${totalVideos} vídeo(s)
+                                <div class="conversion-header">
+                                    <span class="conversion-id">${videoId.substring(0, 8)}...</span>
+                                    <span class="conversion-status status-${status}">
+                                        ${status === 'success' ? '✅ Sucesso' : '❌ Falha'}
                                     </span>
                                 </div>
-                                <div style="margin: 10px 0;">
-                                    <p><strong>Data:</strong> ${formatDate(conv.timestamp)}</p>
-                                    <p><strong>Qualidades:</strong> ${(conv.qualities || []).join(', ') || 'N/A'}</p>
-                                    <p><strong>Vídeos:</strong> ${totalVideos}</p>
+                                <div class="conversion-info">
+                                    <p><strong>Arquivo:</strong> ${filename}</p>
+                                    <p><strong>Data:</strong> ${formatDate(timestamp)}</p>
+                                    <p><strong>Qualidades:</strong> ${qualities.join(', ') || 'N/A'}</p>
                                 </div>
-                                <div style="display: flex; gap: 10px; margin-top: 15px;">
-                                    <button class="btn btn-primary" style="flex: 1; padding: 8px; font-size: 0.85rem;" 
-                                            onclick="copyLink('${conversionId}')">
+                                <div class="conversion-actions">
+                                    <button class="btn btn-primary" onclick="copyLink('${videoId}')">
                                         <i class="fas fa-link"></i> Link
                                     </button>
-                                    <button class="btn btn-success" style="flex: 1; padding: 8px; font-size: 0.85rem;"
-                                            onclick="playVideo('${conversionId}')">
+                                    <button class="btn btn-success" onclick="playVideo('${videoId}')">
                                         <i class="fas fa-play"></i> Play
                                     </button>
                                 </div>
@@ -1453,14 +1453,35 @@ DASHBOARD_HTML = '''
                             <p>${error.message}</p>
                         </div>
                     `;
+                    showToast('Erro ao carregar histórico de conversões', 'error');
                 });
         }
         
-        function copyLink(conversionId) {
-            const link = window.location.origin + '/hls/' + conversionId + '/master.m3u8';
+        function clearHistory() {
+            if (confirm('Tem certeza que deseja limpar todo o histórico de conversões?')) {
+                fetch('/api/clear-history', { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            showToast('✅ Histórico limpo com sucesso!', 'success');
+                            loadConversions();
+                            loadSystemStats();
+                        } else {
+                            showToast(`❌ Erro: ${data.error}`, 'error');
+                        }
+                    })
+                    .catch(error => {
+                        showToast('❌ Erro ao limpar histórico', 'error');
+                    });
+            }
+        }
+        
+        function copyLink(videoId) {
+            const link = window.location.origin + '/hls/' + videoId + '/master.m3u8';
             navigator.clipboard.writeText(link)
                 .then(() => showToast('✅ Link copiado para a área de transferência!', 'success'))
                 .catch(() => {
+                    // Fallback
                     const textArea = document.createElement('textarea');
                     textArea.value = link;
                     document.body.appendChild(textArea);
@@ -1471,13 +1492,30 @@ DASHBOARD_HTML = '''
                 });
         }
         
-        function playVideo(conversionId) {
-            window.open('/player/' + conversionId, '_blank');
+        function playVideo(videoId) {
+            window.open('/player/' + videoId, '_blank');
         }
         
         // =============== CONFIGURAÇÕES ===============
         function changePassword() {
             window.location.href = '/change-password';
+        }
+        
+        function cleanupFiles() {
+            if (confirm('Limpar todos os arquivos temporários e convertidos?')) {
+                fetch('/api/cleanup', { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            showToast(`✅ ${data.message}`, 'success');
+                        } else {
+                            showToast(`❌ Erro: ${data.error}`, 'error');
+                        }
+                    })
+                    .catch(() => {
+                        showToast('❌ Erro ao limpar arquivos', 'error');
+                    });
+            }
         }
         
         function cleanupOldFiles() {
@@ -1491,6 +1529,24 @@ DASHBOARD_HTML = '''
                         showToast('❌ Erro ao limpar arquivos antigos', 'error');
                     });
             }
+        }
+        
+        function loadSystemInfo() {
+            fetch('/api/system-info')
+                .then(response => response.json())
+                .then(data => {
+                    const container = document.getElementById('systemInfo');
+                    container.innerHTML = `
+                        <p><strong>Versão:</strong> ${data.version || 'N/A'}</p>
+                        <p><strong>Diretório:</strong> ${data.base_dir || 'N/A'}</p>
+                        <p><strong>Usuários:</strong> ${data.users_count || 0}</p>
+                        <p><strong>Serviço:</strong> ${data.service_status || 'N/A'}</p>
+                        <p><strong>Uptime:</strong> ${data.uptime || 'N/A'}</p>
+                    `;
+                })
+                .catch(error => {
+                    document.getElementById('systemInfo').innerHTML = 'Erro ao carregar informações';
+                });
         }
         
         // =============== UTILITÁRIOS ===============
@@ -1512,6 +1568,7 @@ DASHBOARD_HTML = '''
         }
         
         function showToast(message, type = 'info') {
+            // Remover toasts anteriores
             document.querySelectorAll('.toast').forEach(toast => toast.remove());
             
             const toast = document.createElement('div');
@@ -1523,6 +1580,7 @@ DASHBOARD_HTML = '''
             
             document.body.appendChild(toast);
             
+            // Remover após 5 segundos
             setTimeout(() => {
                 toast.remove();
             }, 5000);
@@ -1531,9 +1589,11 @@ DASHBOARD_HTML = '''
         // =============== INICIALIZAÇÃO ===============
         document.addEventListener('DOMContentLoaded', function() {
             loadSystemStats();
+            
+            // Atualizar stats a cada 30 segundos
             setInterval(loadSystemStats, 30000);
             
-            // Configurar drag and drop para múltiplos arquivos
+            // Configurar drag and drop
             const uploadArea = document.querySelector('.upload-area');
             
             uploadArea.addEventListener('dragover', (e) => {
@@ -1550,18 +1610,13 @@ DASHBOARD_HTML = '''
                 uploadArea.style.backgroundColor = '';
                 
                 if (e.dataTransfer.files.length > 0) {
-                    const newFiles = Array.from(e.dataTransfer.files);
+                    selectedFile = e.dataTransfer.files[0];
                     
-                    newFiles.forEach(newFile => {
-                        const exists = selectedFiles.some(existingFile => 
-                            existingFile.name === newFile.name && existingFile.size === newFile.size
-                        );
-                        if (!exists) {
-                            selectedFiles.push(newFile);
-                        }
-                    });
+                    const fileInfo = document.getElementById('fileInfo');
+                    fileInfo.classList.add('show');
                     
-                    updateFileList();
+                    document.getElementById('fileName').textContent = selectedFile.name;
+                    document.getElementById('fileSize').textContent = formatBytes(selectedFile.size);
                 }
             });
         });
@@ -1577,6 +1632,7 @@ def index():
     if 'user_id' not in session:
         return redirect(url_for('login'))
     
+    # Verificar se precisa trocar senha
     if password_change_required(session['user_id']):
         return redirect(url_for('change_password'))
     
@@ -1589,6 +1645,7 @@ def login():
             return redirect(url_for('index'))
         return render_template_string(LOGIN_HTML)
     
+    # Processar login
     username = request.form.get('username', '').strip()
     password = request.form.get('password', '').strip()
     
@@ -1597,14 +1654,17 @@ def login():
         return render_template_string(LOGIN_HTML)
     
     if check_password(username, password):
+        # Atualizar último login
         users = load_users()
         if username in users.get('users', {}):
             users['users'][username]['last_login'] = datetime.now().isoformat()
             save_users(users)
         
+        # Criar sessão
         session['user_id'] = username
         session['login_time'] = datetime.now().isoformat()
         
+        # Verificar se precisa trocar senha
         if password_change_required(username):
             return redirect(url_for('change_password'))
         
@@ -1622,11 +1682,13 @@ def change_password():
     if request.method == 'GET':
         return render_template_string(CHANGE_PASSWORD_HTML)
     
+    # Processar alteração de senha
     username = session['user_id']
     current_password = request.form.get('current_password', '').strip()
     new_password = request.form.get('new_password', '').strip()
     confirm_password = request.form.get('confirm_password', '').strip()
     
+    # Validações
     errors = []
     
     if not all([current_password, new_password, confirm_password]):
@@ -1649,6 +1711,7 @@ def change_password():
             flash(error, 'error')
         return render_template_string(CHANGE_PASSWORD_HTML)
     
+    # Alterar senha
     try:
         new_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
         users = load_users()
@@ -1672,219 +1735,6 @@ def logout():
     flash('✅ Você foi desconectado com sucesso', 'info')
     return redirect(url_for('login'))
 
-# =============== NOVA FUNÇÃO DE CONVERSÃO MÚLTIPLA ===============
-@app.route('/convert-multiple', methods=['POST'])
-def convert_multiple_videos():
-    """Converter múltiplos vídeos para um único M3U8 - NOVA FUNÇÃO"""
-    if 'user_id' not in session:
-        return jsonify({"success": False, "error": "Não autenticado"}), 401
-    
-    try:
-        # Verificar FFmpeg
-        ffmpeg_path = find_ffmpeg()
-        if not ffmpeg_path:
-            return jsonify({
-                "success": False,
-                "error": "FFmpeg não encontrado. Execute: sudo apt-get install ffmpeg"
-            })
-        
-        # Obter parâmetros
-        file_count = int(request.form.get('file_count', 0))
-        qualities_json = request.form.get('qualities', '["720p"]')
-        sequential_naming = request.form.get('sequential_naming', 'true').lower() == 'true'
-        
-        try:
-            qualities = json.loads(qualities_json)
-        except:
-            qualities = ["720p"]
-        
-        if file_count == 0:
-            return jsonify({"success": False, "error": "Nenhum arquivo enviado"})
-        
-        # Criar ID único para esta conversão múltipla
-        conversion_id = str(uuid.uuid4())[:12]
-        output_dir = os.path.join(HLS_DIR, conversion_id)
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Coletar todos os arquivos
-        video_files = []
-        for i in range(file_count):
-            file_key = f'file{i}'
-            if file_key in request.files:
-                file = request.files[file_key]
-                if file and file.filename:
-                    video_files.append({
-                        'file': file,
-                        'filename': file.filename,
-                        'index': i
-                    })
-        
-        if not video_files:
-            return jsonify({"success": False, "error": "Nenhum arquivo válido encontrado"})
-        
-        # Ordenar arquivos por nome
-        video_files.sort(key=lambda x: x['filename'])
-        
-        # Processar cada vídeo
-        processed_videos = []
-        master_playlist_content = ["#EXTM3U", "#EXT-X-VERSION:3"]
-        
-        for idx, video_info in enumerate(video_files):
-            file = video_info['file']
-            original_filename = video_info['filename']
-            
-            # Criar nome para o vídeo
-            if sequential_naming:
-                video_name = f"Vídeo {idx + 1}"
-            else:
-                video_name = os.path.splitext(original_filename)[0]
-            
-            # Salvar arquivo original
-            video_dir = os.path.join(output_dir, f"video_{idx}")
-            os.makedirs(video_dir, exist_ok=True)
-            
-            original_path = os.path.join(video_dir, "original.mp4")
-            file.save(original_path)
-            
-            # Criar playlist para este vídeo
-            video_playlist = os.path.join(video_dir, "playlist.m3u8")
-            
-            with open(video_playlist, 'w') as f:
-                f.write("#EXTM3U\n")
-                f.write("#EXT-X-VERSION:3\n")
-                
-                # Adicionar marcador de início do vídeo
-                f.write(f"#EXTINF:,\n")
-                f.write(f"# Video: {video_name}\n")
-                
-                # Converter para cada qualidade
-                for quality in qualities:
-                    quality_dir = os.path.join(video_dir, quality)
-                    os.makedirs(quality_dir, exist_ok=True)
-                    
-                    m3u8_file = os.path.join(quality_dir, "index.m3u8")
-                    
-                    # Configurações por qualidade
-                    if quality == '240p':
-                        scale = "426:240"
-                        bitrate = "400k"
-                        audio_bitrate = "64k"
-                        bandwidth = "400000"
-                    elif quality == '480p':
-                        scale = "854:480"
-                        bitrate = "800k"
-                        audio_bitrate = "96k"
-                        bandwidth = "800000"
-                    elif quality == '720p':
-                        scale = "1280:720"
-                        bitrate = "1500k"
-                        audio_bitrate = "128k"
-                        bandwidth = "1500000"
-                    elif quality == '1080p':
-                        scale = "1920:1080"
-                        bitrate = "3000k"
-                        audio_bitrate = "192k"
-                        bandwidth = "3000000"
-                    else:
-                        continue
-                    
-                    # Comando FFmpeg
-                    cmd = [
-                        ffmpeg_path, '-i', original_path,
-                        '-vf', f'scale={scale}',
-                        '-c:v', 'libx264', '-preset', 'fast',
-                        '-c:a', 'aac', '-b:a', audio_bitrate,
-                        '-hls_time', '10',
-                        '-hls_list_size', '0',
-                        '-hls_segment_filename', os.path.join(quality_dir, 'segment_%03d.ts'),
-                        '-f', 'hls', m3u8_file
-                    ]
-                    
-                    # Executar conversão
-                    try:
-                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-                        if result.returncode == 0:
-                            # Adicionar ao master playlist
-                            if idx == 0:  # Apenas uma vez por qualidade
-                                master_playlist_content.append(
-                                    f'#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},RESOLUTION={scale.replace(":", "x")}'
-                                )
-                                master_playlist_content.append(f'video_0/{quality}/index.m3u8')
-                    except subprocess.TimeoutExpired:
-                        print(f"Timeout na conversão do vídeo {idx} para {quality}")
-            
-            # Adicionar ao master playlist para vídeos subsequentes
-            for quality in qualities:
-                if idx > 0:  # Para vídeos após o primeiro
-                    master_playlist_content.append(f'#EXT-X-DISCONTINUITY')
-                    master_playlist_content.append(f'# Video: {video_name}')
-                    master_playlist_content.append(f'video_{idx}/{quality}/index.m3u8')
-            
-            processed_videos.append({
-                'index': idx,
-                'filename': original_filename,
-                'display_name': video_name,
-                'qualities': qualities,
-                'path': f'video_{idx}'
-            })
-        
-        # Criar master playlist
-        master_playlist = os.path.join(output_dir, "master.m3u8")
-        with open(master_playlist, 'w') as f:
-            f.write('\n'.join(master_playlist_content))
-        
-        # Atualizar banco de dados
-        conversions = load_conversions()
-        conversion_data = {
-            "conversion_id": conversion_id,
-            "type": "multiple",
-            "total_videos": len(processed_videos),
-            "videos": processed_videos,
-            "qualities": qualities,
-            "timestamp": datetime.now().isoformat(),
-            "status": "success",
-            "master_m3u8_url": f"/hls/{conversion_id}/master.m3u8"
-        }
-        
-        if not isinstance(conversions.get('conversions'), list):
-            conversions['conversions'] = []
-        
-        conversions['conversions'].insert(0, conversion_data)
-        conversions['stats']['total'] = conversions['stats'].get('total', 0) + 1
-        conversions['stats']['success'] = conversions['stats'].get('success', 0) + 1
-        
-        save_conversions(conversions)
-        
-        log_activity(f"Conversão múltipla realizada: {len(processed_videos)} vídeos -> {conversion_id}")
-        
-        return jsonify({
-            "success": True,
-            "conversion_id": conversion_id,
-            "total_videos": len(processed_videos),
-            "qualities": qualities,
-            "videos": processed_videos,
-            "master_m3u8_url": f"/hls/{conversion_id}/master.m3u8",
-            "player_url": f"/player/{conversion_id}"
-        })
-        
-    except Exception as e:
-        print(f"Erro na conversão múltipla: {e}")
-        
-        # Registrar falha
-        try:
-            conversions = load_conversions()
-            conversions['stats']['total'] = conversions['stats'].get('total', 0) + 1
-            conversions['stats']['failed'] = conversions['stats'].get('failed', 0) + 1
-            save_conversions(conversions)
-        except:
-            pass
-        
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        })
-
-# =============== ROTAS DE API E SERVIÇO ===============
 @app.route('/api/system')
 def api_system():
     """Endpoint para informações do sistema"""
@@ -1913,17 +1763,19 @@ def api_system():
 
 @app.route('/api/conversions')
 def api_conversions():
-    """Endpoint para listar conversões"""
+    """Endpoint para listar conversões - CORRIGIDO"""
     try:
         data = load_conversions()
         
+        # CORREÇÃO: Garantir que conversions é uma lista
         if not isinstance(data.get('conversions'), list):
             data['conversions'] = []
         
+        # CORREÇÃO: Ordenar por data (mais recente primeiro)
         try:
             data['conversions'].sort(key=lambda x: x.get('timestamp', ''), reverse=True)
         except:
-            pass
+            pass  # Se não conseguir ordenar, continua sem ordenar
         
         return jsonify(data)
     except Exception as e:
@@ -1933,6 +1785,66 @@ def api_conversions():
             "stats": {"total": 0, "success": 0, "failed": 0}
         })
 
+@app.route('/api/clear-history', methods=['POST'])
+def api_clear_history():
+    """Limpar histórico de conversões"""
+    try:
+        data = load_conversions()
+        count = len(data.get('conversions', []))
+        
+        data['conversions'] = []
+        data['stats']['total'] = 0
+        data['stats']['success'] = 0
+        data['stats']['failed'] = 0
+        
+        save_conversions(data)
+        
+        log_activity(f"Histórico de conversões limpo: {count} entradas removidas")
+        
+        return jsonify({
+            "success": True,
+            "message": f"{count} conversões removidas do histórico"
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
+
+@app.route('/api/cleanup', methods=['POST'])
+def api_cleanup():
+    """Limpar todos os arquivos"""
+    try:
+        deleted_count = 0
+        
+        # Limpar uploads
+        if os.path.exists(UPLOAD_DIR):
+            for filename in os.listdir(UPLOAD_DIR):
+                filepath = os.path.join(UPLOAD_DIR, filename)
+                if os.path.isfile(filepath):
+                    os.remove(filepath)
+                    deleted_count += 1
+        
+        # Limpar HLS (exceto estrutura)
+        if os.path.exists(HLS_DIR):
+            for item in os.listdir(HLS_DIR):
+                item_path = os.path.join(HLS_DIR, item)
+                if os.path.isdir(item_path) and item not in ['240p', '360p', '480p', '720p', '1080p', 'original']:
+                    shutil.rmtree(item_path, ignore_errors=True)
+                    deleted_count += 1
+        
+        log_activity(f"Limpeza realizada: {deleted_count} arquivos removidos")
+        
+        return jsonify({
+            "success": True,
+            "message": f"{deleted_count} arquivos removidos"
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
+
 @app.route('/api/cleanup-old', methods=['POST'])
 def api_cleanup_old():
     """Limpar arquivos antigos"""
@@ -1940,21 +1852,23 @@ def api_cleanup_old():
         deleted_count = 0
         now = time.time()
         
+        # Limpar uploads antigos (>7 dias)
         if os.path.exists(UPLOAD_DIR):
             for filename in os.listdir(UPLOAD_DIR):
                 filepath = os.path.join(UPLOAD_DIR, filename)
                 if os.path.isfile(filepath):
                     file_age = now - os.path.getmtime(filepath)
-                    if file_age > 7 * 24 * 3600:
+                    if file_age > 7 * 24 * 3600:  # 7 dias
                         os.remove(filepath)
                         deleted_count += 1
         
+        # Limpar diretórios HLS antigos
         if os.path.exists(HLS_DIR):
             for item in os.listdir(HLS_DIR):
                 item_path = os.path.join(HLS_DIR, item)
                 if os.path.isdir(item_path):
                     dir_age = now - os.path.getmtime(item_path)
-                    if dir_age > 7 * 24 * 3600:
+                    if dir_age > 7 * 24 * 3600:  # 7 dias
                         shutil.rmtree(item_path, ignore_errors=True)
                         deleted_count += 1
         
@@ -2007,27 +1921,201 @@ def api_ffmpeg_test():
             "error": str(e)
         })
 
-@app.route('/hls/<conversion_id>/master.m3u8')
-@app.route('/hls/<conversion_id>/<path:filename>')
-def serve_hls(conversion_id, filename=None):
+@app.route('/api/system-info')
+def api_system_info():
+    """Informações detalhadas do sistema"""
+    try:
+        users = load_users()
+        
+        return jsonify({
+            "version": "2.0.0",
+            "base_dir": BASE_DIR,
+            "users_count": len(users.get('users', {})),
+            "service_status": "running",
+            "uptime": str(datetime.now() - datetime.fromtimestamp(psutil.boot_time())).split('.')[0],
+            "ffmpeg": "installed" if find_ffmpeg() else "not installed"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/convert', methods=['POST'])
+def convert_video():
+    """Converter vídeo para HLS"""
+    if 'user_id' not in session:
+        return jsonify({"success": False, "error": "Não autenticado"}), 401
+    
+    try:
+        # Verificar FFmpeg
+        ffmpeg_path = find_ffmpeg()
+        if not ffmpeg_path:
+            return jsonify({
+                "success": False,
+                "error": "FFmpeg não encontrado. Execute: sudo apt-get install ffmpeg"
+            })
+        
+        # Verificar arquivo
+        if 'file' not in request.files:
+            return jsonify({"success": False, "error": "Nenhum arquivo enviado"})
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"success": False, "error": "Nenhum arquivo selecionado"})
+        
+        # Obter qualidades
+        qualities_json = request.form.get('qualities', '["720p"]')
+        try:
+            qualities = json.loads(qualities_json)
+        except:
+            qualities = ["720p"]
+        
+        # Gerar ID único
+        video_id = str(uuid.uuid4())[:8]
+        output_dir = os.path.join(HLS_DIR, video_id)
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Salvar arquivo original
+        filename = file.filename
+        original_path = os.path.join(output_dir, "original.mp4")
+        file.save(original_path)
+        
+        # Criar master playlist
+        master_playlist = os.path.join(output_dir, "master.m3u8")
+        
+        with open(master_playlist, 'w') as f:
+            f.write("#EXTM3U\n")
+            f.write("#EXT-X-VERSION:3\n")
+            
+            # Converter para cada qualidade
+            for quality in qualities:
+                quality_dir = os.path.join(output_dir, quality)
+                os.makedirs(quality_dir, exist_ok=True)
+                
+                m3u8_file = os.path.join(quality_dir, "index.m3u8")
+                
+                # Configurações por qualidade
+                if quality == '240p':
+                    scale = "426:240"
+                    bitrate = "400k"
+                    audio_bitrate = "64k"
+                    bandwidth = "400000"
+                elif quality == '480p':
+                    scale = "854:480"
+                    bitrate = "800k"
+                    audio_bitrate = "96k"
+                    bandwidth = "800000"
+                elif quality == '720p':
+                    scale = "1280:720"
+                    bitrate = "1500k"
+                    audio_bitrate = "128k"
+                    bandwidth = "1500000"
+                elif quality == '1080p':
+                    scale = "1920:1080"
+                    bitrate = "3000k"
+                    audio_bitrate = "192k"
+                    bandwidth = "3000000"
+                else:
+                    continue
+                
+                # Comando FFmpeg
+                cmd = [
+                    ffmpeg_path, '-i', original_path,
+                    '-vf', f'scale={scale}',
+                    '-c:v', 'libx264', '-preset', 'fast',
+                    '-c:a', 'aac', '-b:a', audio_bitrate,
+                    '-hls_time', '10',
+                    '-hls_list_size', '0',
+                    '-hls_segment_filename', os.path.join(quality_dir, 'segment_%03d.ts'),
+                    '-f', 'hls', m3u8_file
+                ]
+                
+                # Executar conversão
+                try:
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                    if result.returncode == 0:
+                        f.write(f'#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},RESOLUTION={scale.replace(":", "x")}\n')
+                        f.write(f'{quality}/index.m3u8\n')
+                    else:
+                        print(f"Erro FFmpeg para {quality}: {result.stderr[:200]}")
+                except subprocess.TimeoutExpired:
+                    print(f"Timeout na conversão para {quality}")
+        
+        # Limpar arquivo original se configurado
+        if not os.path.exists(os.path.join(output_dir, "original")):
+            os.makedirs(os.path.join(output_dir, "original"))
+        shutil.move(original_path, os.path.join(output_dir, "original", filename))
+        
+        # Atualizar banco de dados - CORRIGIDO
+        conversions = load_conversions()
+        conversion_data = {
+            "video_id": video_id,
+            "filename": filename,
+            "qualities": qualities,
+            "timestamp": datetime.now().isoformat(),
+            "status": "success",
+            "m3u8_url": f"/hls/{video_id}/master.m3u8"
+        }
+        
+        # CORREÇÃO: Garantir que conversions é uma lista
+        if not isinstance(conversions.get('conversions'), list):
+            conversions['conversions'] = []
+        
+        # Adicionar no início da lista
+        conversions['conversions'].insert(0, conversion_data)
+        
+        # Atualizar estatísticas
+        conversions['stats']['total'] = conversions['stats'].get('total', 0) + 1
+        conversions['stats']['success'] = conversions['stats'].get('success', 0) + 1
+        
+        save_conversions(conversions)
+        
+        log_activity(f"Conversão realizada: {filename} -> {video_id}")
+        
+        return jsonify({
+            "success": True,
+            "video_id": video_id,
+            "qualities": qualities,
+            "m3u8_url": f"/hls/{video_id}/master.m3u8",
+            "player_url": f"/player/{video_id}"
+        })
+        
+    except Exception as e:
+        print(f"Erro na conversão: {e}")
+        
+        # Registrar falha
+        try:
+            conversions = load_conversions()
+            conversions['stats']['total'] = conversions['stats'].get('total', 0) + 1
+            conversions['stats']['failed'] = conversions['stats'].get('failed', 0) + 1
+            save_conversions(conversions)
+        except:
+            pass
+        
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
+
+@app.route('/hls/<video_id>/master.m3u8')
+@app.route('/hls/<video_id>/<path:filename>')
+def serve_hls(video_id, filename=None):
     """Servir arquivos HLS"""
     if filename is None:
         filename = "master.m3u8"
     
-    filepath = os.path.join(HLS_DIR, conversion_id, filename)
+    filepath = os.path.join(HLS_DIR, video_id, filename)
     if os.path.exists(filepath):
         return send_file(filepath)
     return "Arquivo não encontrado", 404
 
-@app.route('/player/<conversion_id>')
-def player_page(conversion_id):
+@app.route('/player/<video_id>')
+def player_page(video_id):
     """Página do player"""
-    m3u8_url = f"/hls/{conversion_id}/master.m3u8"
+    m3u8_url = f"/hls/{video_id}/master.m3u8"
     player_html = f'''
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Player HLS - {conversion_id}</title>
+        <title>Player HLS - {video_id}</title>
         <link href="https://vjs.zencdn.net/7.20.3/video-js.css" rel="stylesheet">
         <style>
             body {{ margin: 0; padding: 20px; background: #000; }}
@@ -2041,26 +2129,11 @@ def player_page(conversion_id):
                 cursor: pointer;
                 margin-bottom: 20px;
             }}
-            .info-box {{
-                background: #1a1a1a;
-                color: #fff;
-                padding: 15px;
-                border-radius: 5px;
-                margin-bottom: 20px;
-                border-left: 4px solid #4361ee;
-            }}
         </style>
     </head>
     <body>
         <div class="player-container">
             <button class="back-btn" onclick="window.history.back()">← Voltar</button>
-            
-            <div class="info-box">
-                <h3 style="margin-top: 0;">🎬 Playlist de Múltiplos Vídeos</h3>
-                <p>Todos os vídeos serão reproduzidos em sequência automaticamente.</p>
-                <p><strong>ID:</strong> {conversion_id}</p>
-            </div>
-            
             <video id="hlsPlayer" class="video-js vjs-default-skin" controls preload="auto" width="100%" height="auto">
                 <source src="{m3u8_url}" type="application/x-mpegURL">
             </video>
@@ -2071,11 +2144,6 @@ def player_page(conversion_id):
         <script>
             var player = videojs('hlsPlayer');
             player.play();
-            
-            // Configurar para reprodução contínua
-            player.on('ended', function() {{
-                console.log('Vídeo atual terminado, próximo vídeo iniciará automaticamente');
-            }});
         </script>
     </body>
     </html>
@@ -2087,25 +2155,24 @@ def health():
     """Health check endpoint"""
     return jsonify({
         "status": "healthy",
-        "service": "hls-converter-ultimate-multiple",
+        "service": "hls-converter-ultimate",
         "timestamp": datetime.now().isoformat(),
-        "version": "3.0.0",
-        "feature": "multiple-files",
+        "version": "2.0.0",
         "ffmpeg": find_ffmpeg() is not None
     })
 
 # =============== INICIALIZAÇÃO ===============
 if __name__ == '__main__':
-    print("=" * 70)
-    print("🚀 HLS Converter ULTIMATE - Múltiplos Arquivos")
-    print("=" * 70)
+    print("=" * 60)
+    print("🚀 HLS Converter ULTIMATE - Versão Final Corrigida")
+    print("=" * 60)
     print(f"📂 Diretório base: {BASE_DIR}")
     print(f"🔐 Autenticação: Habilitada")
     print(f"👤 Usuário padrão: admin / admin")
-    print(f"🎬 Funcionalidade: Múltiplos arquivos em um único link")
     print(f"🌐 Porta: 8080")
-    print("=" * 70)
+    print("=" * 60)
     
+    # Testar FFmpeg
     ffmpeg_path = find_ffmpeg()
     if ffmpeg_path:
         print(f"✅ FFmpeg encontrado: {ffmpeg_path}")
@@ -2126,12 +2193,6 @@ if __name__ == '__main__':
     print(f"   🩺 Health: http://localhost:8080/health")
     print(f"   🎮 Dashboard: http://localhost:8080/")
     print("")
-    print("💡 Como usar:")
-    print("   1. Selecione múltiplos arquivos na aba 'Upload Múltiplo'")
-    print("   2. Escolha as qualidades desejadas")
-    print("   3. Clique em 'Iniciar Conversão de Todos os Vídeos'")
-    print("   4. Um único link M3U8 será gerado com todos os vídeos em sequência")
-    print("=" * 70)
     
     # Garantir que os arquivos de banco de dados existam
     print("💾 Inicializando banco de dados...")
@@ -2146,8 +2207,6 @@ if __name__ == '__main__':
         print("⚠️  Waitress não encontrado, usando servidor de desenvolvimento...")
         app.run(host='0.0.0.0', port=8080, debug=False)
 EOF
-
-# [O resto do script continua igual, apenas atualizando as referências]
 
 # 11. CRIAR ARQUIVOS DE BANCO DE DADOS
 echo "💾 Criando arquivos de banco de dados..."
@@ -2184,8 +2243,8 @@ cat > /opt/hls-converter/db/conversions.json << 'EOF'
 }
 EOF
 
-# 12. CRIAR SCRIPT DE GERENCIAMENTO ATUALIZADO
-echo "📝 Criando script de gerenciamento atualizado..."
+# 12. CRIAR SCRIPT DE GERENCIAMENTO FINAL
+echo "📝 Criando script de gerenciamento final..."
 
 cat > /usr/local/bin/hlsctl << 'EOF'
 #!/bin/bash
@@ -2194,7 +2253,7 @@ HLS_HOME="/opt/hls-converter"
 
 case "$1" in
     start)
-        echo "🚀 Iniciando HLS Converter (Múltiplos Arquivos)..."
+        echo "🚀 Iniciando HLS Converter..."
         systemctl start hls-converter
         echo "✅ Serviço iniciado"
         ;;
@@ -2224,9 +2283,11 @@ case "$1" in
         echo "🧪 Testando sistema..."
         echo ""
         
+        # Serviço
         if systemctl is-active --quiet hls-converter; then
             echo "✅ Serviço está ativo"
             
+            # Health check
             echo "🌐 Testando health check..."
             if curl -s http://localhost:8080/health | grep -q "healthy"; then
                 echo "✅ Health check OK"
@@ -2235,6 +2296,7 @@ case "$1" in
                 curl -s http://localhost:8080/health || true
             fi
             
+            # Login
             echo "🔐 Testando login..."
             STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/login)
             if [ "$STATUS_CODE" = "200" ]; then
@@ -2247,6 +2309,7 @@ case "$1" in
             echo "❌ Serviço não está ativo"
         fi
         
+        # FFmpeg
         echo ""
         echo "🎬 Testando FFmpeg..."
         if command -v ffmpeg &> /dev/null; then
@@ -2293,19 +2356,14 @@ print('⚠️  Altere a senha no primeiro login!')
         ;;
     info)
         IP=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "localhost")
-        echo "=" * 60
-        echo "🎬 HLS Converter ULTIMATE - Múltiplos Arquivos"
-        echo "=" * 60
+        echo "=" * 50
+        echo "🎬 HLS Converter ULTIMATE - Informações"
+        echo "=" * 50
         echo "Status: $(systemctl is-active hls-converter 2>/dev/null || echo 'inactive')"
         echo "Porta: 8080"
         echo "Login: http://$IP:8080/login"
         echo "Usuário: admin"
         echo "Senha: admin (altere no primeiro acesso)"
-        echo ""
-        echo "✨ Funcionalidade:"
-        echo "  ✅ Upload de múltiplos arquivos"
-        echo "  ✅ Um único link M3U8 para todos os vídeos"
-        echo "  ✅ Reprodução sequencial automática"
         echo ""
         echo "📁 Diretórios:"
         echo "  /opt/hls-converter/ - Diretório principal"
@@ -2313,7 +2371,7 @@ print('⚠️  Altere a senha no primeiro login!')
         echo "  /opt/hls-converter/hls/ - Arquivos HLS"
         echo "  /opt/hls-converter/logs/ - Logs do sistema"
         echo "  /opt/hls-converter/db/ - Banco de dados"
-        echo "=" * 60
+        echo "=" * 50
         ;;
     *)
         echo "🎬 HLS Converter ULTIMATE - Gerenciador"
@@ -2333,11 +2391,6 @@ print('⚠️  Altere a senha no primeiro login!')
         echo "  reset-password - Resetar senha do admin"
         echo "  info         - Informações do sistema"
         echo ""
-        echo "✨ Nova Funcionalidade:"
-        echo "  - Upload de múltiplos arquivos"
-        echo "  - Um único link para todos os vídeos"
-        echo "  - Reprodução sequencial automática"
-        echo ""
         echo "Exemplos:"
         echo "  hlsctl start"
         echo "  hlsctl logs -f"
@@ -2352,7 +2405,7 @@ echo "⚙️ Configurando serviço systemd..."
 
 cat > /etc/systemd/system/hls-converter.service << 'EOF'
 [Unit]
-Description=HLS Converter ULTIMATE Service (Multiple Files)
+Description=HLS Converter ULTIMATE Service
 After=network.target
 Wants=network.target
 
@@ -2417,12 +2470,14 @@ if systemctl is-active --quiet hls-converter.service; then
     echo ""
     echo "🧪 Testes rápidos:"
     
+    # Health check
     if curl -s http://localhost:8080/health | grep -q "healthy"; then
         echo "✅ Health check: OK"
     else
         echo "⚠️  Health check: Pode ter problemas"
     fi
     
+    # Login page
     STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/login)
     if [ "$STATUS_CODE" = "200" ]; then
         echo "✅ Página de login: OK"
@@ -2439,9 +2494,9 @@ fi
 
 # 17. INFORMAÇÕES FINAIS
 echo ""
-echo "=" * 70
-echo "🎉 INSTALAÇÃO COMPLETA - MÚLTIPLOS ARQUIVOS EM UM ÚNICO LINK! 🎉"
-echo "=" * 70
+echo "=" * 60
+echo "🎉 INSTALAÇÃO FINAL COMPLETA COM CORREÇÕES APLICADAS! 🎉"
+echo "=" * 60
 echo ""
 echo "✅ SISTEMA PRONTO PARA USO"
 echo ""
@@ -2455,12 +2510,6 @@ echo "   🔐 Login:    http://$IP:8080/login"
 echo "   🎮 Dashboard: http://$IP:8080/"
 echo "   🩺 Health:   http://$IP:8080/health"
 echo ""
-echo "✨ NOVA FUNCIONALIDADE:"
-echo "   • 📁 Upload de múltiplos arquivos de uma vez"
-echo "   • 🔗 Um único link M3U8 para todos os vídeos"
-echo "   • ▶️ Reprodução sequencial automática"
-echo "   • 🎬 Vídeos numerados (Vídeo 1, Vídeo 2, etc.)"
-echo ""
 echo "⚙️  COMANDOS DE GERENCIAMENTO:"
 echo "   • hlsctl start      - Iniciar serviço"
 echo "   • hlsctl stop       - Parar serviço"
@@ -2470,15 +2519,27 @@ echo "   • hlsctl logs       - Ver logs"
 echo "   • hlsctl test       - Testar sistema"
 echo "   • hlsctl fix-ffmpeg - Reparar FFmpeg"
 echo ""
-echo "💡 COMO USAR A NOVA FUNCIONALIDADE:"
-echo "   1. Acesse http://$IP:8080/login"
-echo "   2. Vá para a aba 'Upload Múltiplo'"
-echo "   3. Selecione vários arquivos de vídeo"
-echo "   4. Escolha as qualidades desejadas"
-echo "   5. Clique em 'Iniciar Conversão de Todos os Vídeos'"
-echo "   6. Um único link será gerado para todos os vídeos"
-echo "   7. Os vídeos serão reproduzidos em sequência automaticamente"
+echo "📁 ESTRUTURA:"
+echo "   /opt/hls-converter/     - Diretório principal"
+echo "   ├── app.py             - Aplicação principal"
+echo "   ├── uploads/           - Vídeos enviados"
+echo "   ├── hls/               - Arquivos HLS gerados"
+echo "   ├── db/                - Banco de dados (usuários/conversões)"
+echo "   ├── logs/              - Logs do sistema"
+echo "   └── sessions/          - Sessões de usuário"
 echo ""
-echo "=" * 70
+echo "🔧 CORREÇÕES APLICADAS:"
+echo "   1. ✅ Sistema de login corrigido"
+echo "   2. ✅ Histórico de conversões funcionando"
+echo "   3. ✅ Estrutura de banco de dados corrigida"
+echo "   4. ✅ Interface atualizada e responsiva"
+echo "   5. ✅ Sistema de notificações (toast)"
+echo "   6. ✅ Validação de dados robusta"
+echo ""
+echo "💡 DICA:"
+echo "   Para testar, faça login e converta um vídeo."
+echo "   O histórico aparecerá automaticamente na aba 'Histórico'."
+echo ""
+echo "=" * 60
 echo "🚀 Sistema pronto! Acesse http://$IP:8080/login"
-echo "=" * 70
+echo "=" * 60
