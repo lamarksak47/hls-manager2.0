@@ -11,4 +11,5 @@ sudo ./install_hls_manager2.0.sh
 APÓS INSTALAÇÃO 
 
 chmod +x fix_login_issue.sh
+
 sudo ./fix_login_issue.sh
