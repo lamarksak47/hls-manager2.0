@@ -13,7 +13,61 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# ... (todo o script anterior continua igual até a parte do app.py) ...
+# 2. Atualizar sistema
+echo "📦 Atualizando sistema..."
+apt-get update
+apt-get upgrade -y
+
+# 3. Parar serviços existentes
+echo "🛑 Parando serviços existentes..."
+systemctl stop hls-simple hls-dashboard hls-manager hls-final hls-converter 2>/dev/null || true
+pkill -9 python 2>/dev/null || true
+sleep 2
+
+# 4. Limpar instalações anteriores
+echo "🧹 Limpando instalações anteriores..."
+rm -rf /opt/hls-converter 2>/dev/null || true
+rm -rf /etc/systemd/system/hls-*.service 2>/dev/null || true
+rm -f /usr/local/bin/hlsctl 2>/dev/null || true
+systemctl daemon-reload
+
+# 5. INSTALAR FFMPEG
+echo "🎬 INSTALANDO FFMPEG..."
+if ! command -v ffmpeg &> /dev/null; then
+    apt-get install -y ffmpeg
+    echo "✅ FFmpeg instalado"
+else
+    echo "✅ FFmpeg já está instalado"
+fi
+
+# 6. Instalar outras dependências
+echo "🔧 Instalando outras dependências..."
+apt-get install -y python3 python3-pip python3-venv curl wget
+
+# 7. Criar estrutura de diretórios
+echo "🏗️  Criando estrutura de diretórios..."
+mkdir -p /opt/hls-converter/{uploads,hls,logs,db,templates,static,sessions}
+mkdir -p /opt/hls-converter/hls/{240p,360p,480p,720p,1080p,original}
+cd /opt/hls-converter
+
+# 8. Criar usuário dedicado
+echo "👤 Criando usuário dedicado..."
+if id "hlsuser" &>/dev/null; then
+    echo "✅ Usuário hlsuser já existe"
+else
+    useradd -r -s /bin/false hlsuser
+    echo "✅ Usuário hlsuser criado"
+fi
+
+# 9. Configurar ambiente Python
+echo "🐍 Configurando ambiente Python..."
+python3 -m venv venv
+source venv/bin/activate
+
+# Instalar dependências Python
+echo "📦 Instalando dependências Python..."
+pip install --upgrade pip
+pip install flask flask-cors waitress werkzeug psutil bcrypt cryptography
 
 # 10. CRIAR APLICAÇÃO FLASK FINAL CORRIGIDA COM MULTI-UPLOAD
 echo "💻 Criando aplicação Flask final com multi-upload..."
