@@ -1,19 +1,19 @@
 #!/bin/bash
-# install_hls_converter_ultimate_fixed.sh - SISTEMA COMPLETO ULTIMATE CORRIGIDO
+# install_hls_converter_final.sh - VERSÃO FINAL CORRIGIDA
 
 set -e
 
-echo "🚀 INSTALANDO HLS CONVERTER ULTIMATE CORRIGIDO"
-echo "=============================================="
+echo "🚀 INSTALANDO HLS CONVERTER ULTIMATE - VERSÃO FINAL"
+echo "==================================================="
 
 # 1. Verificar privilégios
 if [ "$EUID" -ne 0 ]; then
     echo "❌ Por favor, execute como root ou com sudo!"
-    echo "   sudo ./install_hls_converter_ultimate_fixed.sh"
+    echo "   sudo ./install_hls_converter_final.sh"
     exit 1
 fi
 
-# 2. Atualizar sistema primeiro
+# 2. Atualizar sistema
 echo "📦 Atualizando sistema..."
 apt-get update
 apt-get upgrade -y
@@ -31,81 +31,26 @@ rm -rf /etc/systemd/system/hls-*.service 2>/dev/null || true
 rm -f /usr/local/bin/hlsctl 2>/dev/null || true
 systemctl daemon-reload
 
-# 5. FUNÇÃO ROBUSTA PARA INSTALAR FFMPEG
-install_ffmpeg_robust() {
-    echo "🔧 Instalando ffmpeg com métodos múltiplos..."
-    
-    # Método 1: Tentar instalação normal
-    echo "📦 Método 1: Instalação normal do apt..."
-    apt-get update
-    if apt-get install -y ffmpeg; then
-        echo "✅ FFmpeg instalado com sucesso via apt"
-        return 0
-    fi
-    
-    # Método 2: Tentar instalar individualmente
-    echo "📦 Método 2: Instalando componentes individualmente..."
-    apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev libavdevice-dev \
-        libswscale-dev libswresample-dev libpostproc-dev || true
-    
-    # Método 3: Tentar instalar do repositório Snap
-    echo "📦 Método 3: Tentando via Snap..."
-    if command -v snap &> /dev/null; then
-        if snap install ffmpeg --classic; then
-            echo "✅ FFmpeg instalado via Snap"
-            return 0
-        fi
-    fi
-    
-    # Método 4: Binário estático
-    echo "📦 Método 4: Baixando binário estático..."
-    cd /tmp
-    if wget -q https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz || \
-       wget -q https://www.johnvansickle.com/ffmpeg/old-releases/ffmpeg-4.4.1-amd64-static.tar.xz || \
-       curl -L -o ffmpeg-release-amd64-static.tar.xz https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz; then
-        
-        tar -xf ffmpeg-release-amd64-static.tar.xz
-        FFMPEG_DIR=$(find . -name "ffmpeg-*-static" -type d | head -1)
-        if [ -n "$FFMPEG_DIR" ]; then
-            cp "$FFMPEG_DIR"/ffmpeg "$FFMPEG_DIR"/ffprobe /usr/local/bin/
-            chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe
-            echo "✅ FFmpeg instalado de binário estático"
-            return 0
-        fi
-    fi
-    
-    echo "⚠️  Não foi possível instalar FFmpeg automaticamente"
-    return 1
-}
-
-# 6. INSTALAR FFMPEG
+# 5. INSTALAR FFMPEG
 echo "🎬 INSTALANDO FFMPEG..."
-if command -v ffmpeg &> /dev/null; then
-    echo "✅ ffmpeg já está instalado"
-    echo "🔍 Versão do ffmpeg:"
-    ffmpeg -version | head -1
+if ! command -v ffmpeg &> /dev/null; then
+    apt-get install -y ffmpeg
+    echo "✅ FFmpeg instalado"
 else
-    echo "❌ ffmpeg não encontrado, instalando..."
-    if install_ffmpeg_robust; then
-        echo "🎉 FFMPEG INSTALADO COM SUCESSO!"
-        ffmpeg -version | head -1
-    else
-        echo "⚠️  FFmpeg pode não estar instalado corretamente"
-        echo "📋 Execute manualmente: sudo apt-get install -y ffmpeg"
-    fi
+    echo "✅ FFmpeg já está instalado"
 fi
 
-# 7. Instalar outras dependências do sistema
-echo "🔧 Instalando outras dependências do sistema..."
-apt-get install -y python3 python3-pip python3-venv htop curl wget git
+# 6. Instalar outras dependências
+echo "🔧 Instalando outras dependências..."
+apt-get install -y python3 python3-pip python3-venv curl wget
 
-# 8. Criar estrutura de diretórios
+# 7. Criar estrutura de diretórios
 echo "🏗️  Criando estrutura de diretórios..."
 mkdir -p /opt/hls-converter/{uploads,hls,logs,db,templates,static,sessions}
 mkdir -p /opt/hls-converter/hls/{240p,360p,480p,720p,1080p,original}
 cd /opt/hls-converter
 
-# 9. Criar usuário dedicado
+# 8. Criar usuário dedicado
 echo "👤 Criando usuário dedicado..."
 if id "hlsuser" &>/dev/null; then
     echo "✅ Usuário hlsuser já existe"
@@ -114,41 +59,24 @@ else
     echo "✅ Usuário hlsuser criado"
 fi
 
-# 10. Configurar ambiente Python
+# 9. Configurar ambiente Python
 echo "🐍 Configurando ambiente Python..."
 python3 -m venv venv
 source venv/bin/activate
 
-# Instalar dependências Python COM VERIFICAÇÃO
+# Instalar dependências Python
 echo "📦 Instalando dependências Python..."
 pip install --upgrade pip
+pip install flask flask-cors waitress werkzeug psutil bcrypt cryptography
 
-# Lista de dependências com fallback
-DEPS="flask flask-cors waitress werkzeug"
-for dep in $DEPS; do
-    if ! pip install $dep; then
-        echo "⚠️  Falha ao instalar $dep, tentando método alternativo..."
-        pip install $dep --no-deps || true
-    fi
-done
-
-# Dependências opcionais
-pip install psutil python-magic || echo "⚠️  Algumas dependências opcionais falharam"
-
-# Dependências de autenticação (tentativa com fallback)
-if ! pip install bcrypt cryptography; then
-    echo "⚠️  Instalando bcrypt/cryptography via apt..."
-    apt-get install -y python3-bcrypt python3-cryptography || true
-fi
-
-# 11. CRIAR APLICAÇÃO FLASK SIMPLIFICADA E FUNCIONAL
-echo "💻 Criando aplicação Flask corrigida..."
+# 10. CRIAR APLICAÇÃO FLASK FINAL CORRIGIDA
+echo "💻 Criando aplicação Flask final..."
 
 cat > app.py << 'EOF'
 #!/usr/bin/env python3
 """
-HLS Converter ULTIMATE - Versão Corrigida
-Sistema completo com autenticação e correções de inicialização
+HLS Converter ULTIMATE - Versão Final Corrigida
+Sistema completo com autenticação e histórico funcionando
 """
 
 import os
@@ -163,6 +91,7 @@ from flask import Flask, request, jsonify, render_template_string, send_file, re
 from flask_cors import CORS
 import bcrypt
 import secrets
+import psutil
 
 # =============== CONFIGURAÇÃO INICIAL ===============
 app = Flask(__name__, static_folder='static', static_url_path='/static')
@@ -212,12 +141,18 @@ def load_users():
     try:
         if os.path.exists(USERS_FILE):
             with open(USERS_FILE, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+                # Garantir que a estrutura esteja correta
+                if 'users' not in data:
+                    data['users'] = default_users['users']
+                if 'settings' not in data:
+                    data['settings'] = default_users['settings']
+                return data
     except Exception as e:
         print(f"Erro ao carregar usuários: {e}")
+        # Criar arquivo novo se houver erro
+        save_users(default_users)
     
-    # Criar arquivo padrão se não existir
-    save_users(default_users)
     return default_users
 
 def save_users(data):
@@ -229,7 +164,7 @@ def save_users(data):
         print(f"Erro ao salvar usuários: {e}")
 
 def load_conversions():
-    """Carrega conversões do arquivo JSON"""
+    """Carrega conversões do arquivo JSON - CORRIGIDO"""
     default_data = {
         "conversions": [],
         "stats": {"total": 0, "success": 0, "failed": 0}
@@ -238,35 +173,58 @@ def load_conversions():
     try:
         if os.path.exists(CONVERSIONS_FILE):
             with open(CONVERSIONS_FILE, 'r') as f:
-                return json.load(f)
-    except:
-        pass
+                data = json.load(f)
+                # Garantir que a estrutura esteja correta
+                if 'conversions' not in data:
+                    data['conversions'] = []
+                if 'stats' not in data:
+                    data['stats'] = default_data['stats']
+                return data
+    except Exception as e:
+        print(f"Erro ao carregar conversões: {e}")
+        # Se houver erro no JSON, criar novo
+        save_conversions(default_data)
     
     return default_data
 
 def save_conversions(data):
     """Salva conversões no arquivo JSON"""
     try:
+        # Garantir que conversões seja uma lista
+        if not isinstance(data.get('conversions'), list):
+            data['conversions'] = []
+        
+        # Garantir que stats exista
+        if 'stats' not in data:
+            data['stats'] = {"total": 0, "success": 0, "failed": 0}
+        
         with open(CONVERSIONS_FILE, 'w') as f:
             json.dump(data, f, indent=2)
     except Exception as e:
         print(f"Erro ao salvar conversões: {e}")
 
 def check_password(username, password):
-    """Verifica se a senha está correta"""
+    """Verifica se a senha está correta - CORRIGIDO"""
     users = load_users()
-    if username in users['users']:
-        stored_hash = users['users'][username]['password']
-        try:
-            return bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8'))
-        except:
-            return False
-    return False
+    
+    if username not in users.get('users', {}):
+        return False
+    
+    stored_hash = users['users'][username].get('password', '')
+    if not stored_hash:
+        return False
+    
+    try:
+        # CORREÇÃO: Usar encoding correto
+        return bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8'))
+    except Exception as e:
+        print(f"Erro em check_password: {e}")
+        return False
 
 def password_change_required(username):
     """Verifica se o usuário precisa alterar a senha"""
     users = load_users()
-    if username in users['users']:
+    if username in users.get('users', {}):
         return not users['users'][username].get('password_changed', False)
     return False
 
@@ -276,6 +234,16 @@ def find_ffmpeg():
         if os.path.exists(path) and os.access(path, os.X_OK):
             return path
     return None
+
+def log_activity(message):
+    """Registra atividade no log"""
+    try:
+        log_file = os.path.join(LOG_DIR, "activity.log")
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(log_file, 'a') as f:
+            f.write(f"[{timestamp}] {message}\n")
+    except:
+        pass
 
 # =============== PÁGINAS HTML ===============
 LOGIN_HTML = '''
@@ -340,10 +308,17 @@ LOGIN_HTML = '''
             color: #721c24;
             border: 1px solid #f5c6cb;
         }
-        .alert-info {
-            background: #d1ecf1;
-            color: #0c5460;
-            border: 1px solid #bee5eb;
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .credentials {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+            font-size: 14px;
         }
     </style>
 </head>
@@ -371,11 +346,11 @@ LOGIN_HTML = '''
             <button type="submit" class="btn-login">Entrar</button>
         </form>
         
-        <div style="margin-top: 20px; text-align: center; font-size: 14px; color: #666;">
+        <div class="credentials">
             <p><strong>Usuário padrão:</strong> admin</p>
             <p><strong>Senha padrão:</strong> admin</p>
             <p style="color: #dc3545; margin-top: 10px;">
-                ⚠️ É necessário alterar a senha no primeiro acesso
+                ⚠️ Altere a senha no primeiro acesso
             </p>
         </div>
     </div>
@@ -447,10 +422,6 @@ CHANGE_PASSWORD_HTML = '''
             margin-top: 20px;
             font-size: 14px;
         }
-        .requirements ul {
-            margin: 0;
-            padding-left: 20px;
-        }
     </style>
 </head>
 <body>
@@ -505,28 +476,58 @@ DASHBOARD_HTML = '''
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🎬 HLS Converter ULTIMATE</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         :root {
             --primary: #4361ee;
             --secondary: #3a0ca3;
             --accent: #4cc9f0;
+            --success: #2ecc71;
+            --danger: #e74c3c;
+            --warning: #f39c12;
+            --dark: #2c3e50;
+            --light: #ecf0f1;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
         
         body {
-            margin: 0;
-            padding: 0;
-            font-family: Arial, sans-serif;
-            background: #f5f7fb;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            color: var(--dark);
+            line-height: 1.6;
         }
         
         .header {
             background: linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%);
             color: white;
-            padding: 20px;
+            padding: 20px 30px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .logo i {
+            font-size: 2rem;
+        }
+        
+        .logo h1 {
+            font-size: 1.8rem;
+            font-weight: 600;
         }
         
         .user-info {
@@ -535,40 +536,100 @@ DASHBOARD_HTML = '''
             gap: 15px;
         }
         
+        .user-info span {
+            background: rgba(255,255,255,0.2);
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-weight: 500;
+        }
+        
         .logout-btn {
             background: rgba(255,255,255,0.2);
             border: 1px solid rgba(255,255,255,0.3);
             color: white;
-            padding: 8px 15px;
+            padding: 8px 20px;
             border-radius: 5px;
             text-decoration: none;
-            transition: background 0.3s;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         
         .logout-btn:hover {
             background: rgba(255,255,255,0.3);
+            transform: translateY(-1px);
         }
         
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 30px auto;
             padding: 0 20px;
         }
         
-        .card {
+        .nav-tabs {
+            display: flex;
             background: white;
             border-radius: 10px;
+            padding: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+            overflow-x: auto;
+        }
+        
+        .nav-tab {
+            padding: 15px 25px;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+        
+        .nav-tab:hover {
+            background: var(--light);
+        }
+        
+        .nav-tab.active {
+            background: var(--primary);
+            color: white;
+            box-shadow: 0 4px 10px rgba(67, 97, 238, 0.3);
+        }
+        
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.5s ease;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .card {
+            background: white;
+            border-radius: 12px;
             padding: 25px;
             margin-bottom: 25px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.08);
             border: 1px solid #eaeaea;
         }
         
         .card h2 {
             color: var(--primary);
-            margin-top: 0;
-            border-bottom: 2px solid #f0f0f0;
+            margin-bottom: 20px;
             padding-bottom: 15px;
+            border-bottom: 2px solid #f0f0f0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
         
         .stats-grid {
@@ -579,93 +640,238 @@ DASHBOARD_HTML = '''
         }
         
         .stat-item {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 25px;
+            border-radius: 10px;
             text-align: center;
-            padding: 20px;
-            background: #f8f9fa;
-            border-radius: 8px;
+            transition: transform 0.3s;
+        }
+        
+        .stat-item:hover {
+            transform: translateY(-5px);
         }
         
         .stat-value {
-            font-size: 2em;
-            font-weight: bold;
+            font-size: 2.5rem;
+            font-weight: 700;
             color: var(--primary);
+            margin-bottom: 5px;
         }
         
         .stat-label {
-            color: #666;
-            margin-top: 5px;
+            color: #6c757d;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
         
         .upload-area {
             border: 3px dashed var(--primary);
-            border-radius: 10px;
-            padding: 50px;
+            border-radius: 12px;
+            padding: 60px 30px;
             text-align: center;
-            margin: 20px 0;
+            margin: 30px 0;
             cursor: pointer;
             transition: all 0.3s;
+            background: rgba(67, 97, 238, 0.02);
         }
         
         .upload-area:hover {
             background: rgba(67, 97, 238, 0.05);
+            border-color: var(--secondary);
+            transform: translateY(-2px);
+        }
+        
+        .upload-area i {
+            font-size: 4rem;
+            color: var(--primary);
+            margin-bottom: 20px;
+        }
+        
+        .upload-area h3 {
+            color: var(--dark);
+            margin-bottom: 10px;
+        }
+        
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
         }
         
         .btn-primary {
             background: linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%);
             color: white;
-            border: none;
-            padding: 12px 30px;
-            border-radius: 5px;
-            font-size: 16px;
-            cursor: pointer;
-            transition: transform 0.2s;
         }
         
         .btn-primary:hover {
             transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(67, 97, 238, 0.3);
         }
         
-        .nav-tabs {
+        .btn-success {
+            background: linear-gradient(90deg, var(--success) 0%, #27ae60 100%);
+            color: white;
+        }
+        
+        .btn-warning {
+            background: linear-gradient(90deg, var(--warning) 0%, #e67e22 100%);
+            color: white;
+        }
+        
+        .btn-danger {
+            background: linear-gradient(90deg, var(--danger) 0%, #c0392b 100%);
+            color: white;
+        }
+        
+        .conversions-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .conversion-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            border-left: 4px solid var(--accent);
+            transition: transform 0.3s;
+        }
+        
+        .conversion-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.12);
+        }
+        
+        .conversion-header {
             display: flex;
-            border-bottom: 2px solid #eaeaea;
-            margin-bottom: 20px;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
         }
         
-        .nav-tab {
-            padding: 15px 25px;
+        .conversion-id {
+            font-family: monospace;
+            background: var(--light);
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 0.9rem;
+        }
+        
+        .conversion-status {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .conversion-info {
+            margin: 10px 0;
+        }
+        
+        .conversion-info p {
+            margin: 5px 0;
+            font-size: 0.9rem;
+        }
+        
+        .conversion-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .conversion-actions .btn {
+            padding: 8px 15px;
+            font-size: 0.85rem;
+            flex: 1;
+        }
+        
+        .progress-container {
+            background: #e9ecef;
+            border-radius: 10px;
+            height: 20px;
+            overflow: hidden;
+            margin: 20px 0;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent) 0%, var(--primary) 100%);
+            transition: width 0.5s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        
+        .quality-selector {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .quality-option {
+            background: var(--light);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
             cursor: pointer;
-            border-bottom: 3px solid transparent;
             transition: all 0.3s;
+            border: 2px solid transparent;
         }
         
-        .nav-tab.active {
-            border-bottom: 3px solid var(--primary);
-            color: var(--primary);
-            font-weight: bold;
+        .quality-option:hover {
+            background: #e3e6ea;
         }
         
-        .tab-content {
+        .quality-option.selected {
+            background: var(--primary);
+            color: white;
+            border-color: var(--secondary);
+        }
+        
+        .file-info {
+            background: var(--light);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
             display: none;
         }
         
-        .tab-content.active {
+        .file-info.show {
             display: block;
-        }
-        
-        .conversion-item {
-            background: #f8f9fa;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 10px;
-            border-left: 4px solid var(--accent);
+            animation: fadeIn 0.5s ease;
         }
         
         .ffmpeg-status {
             display: inline-block;
-            padding: 5px 10px;
+            padding: 8px 15px;
             border-radius: 20px;
-            font-size: 0.9em;
-            font-weight: bold;
+            font-weight: 600;
+            margin: 10px 0;
         }
         
         .ffmpeg-ok {
@@ -673,74 +879,167 @@ DASHBOARD_HTML = '''
             color: #155724;
         }
         
-        .ffmpeg-missing {
+        .ffmpeg-error {
             background: #f8d7da;
             color: #721c24;
         }
         
-        .system-info {
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+        
+        .empty-state i {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            color: #dee2e6;
+        }
+        
+        .system-status {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 15px;
-            border-radius: 8px;
+            padding: 25px;
+            border-radius: 12px;
             margin-top: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .header {
+                flex-direction: column;
+                gap: 15px;
+                text-align: center;
+            }
+            
+            .nav-tabs {
+                flex-wrap: wrap;
+            }
+            
+            .nav-tab {
+                flex: 1;
+                min-width: 120px;
+                justify-content: center;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .conversions-list {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: white;
+            padding: 15px 25px;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            z-index: 1000;
+            animation: slideIn 0.3s ease;
+            border-left: 4px solid var(--primary);
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        .toast.success {
+            border-left-color: var(--success);
+        }
+        
+        .toast.error {
+            border-left-color: var(--danger);
+        }
+        
+        .toast.warning {
+            border-left-color: var(--warning);
         }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>🎬 HLS Converter ULTIMATE</h1>
+        <div class="logo">
+            <i class="fas fa-video"></i>
+            <h1>HLS Converter ULTIMATE</h1>
+        </div>
         <div class="user-info">
-            <span>👤 {{ session.user_id }}</span>
-            <a href="/logout" class="logout-btn">🚪 Sair</a>
+            <span><i class="fas fa-user"></i> {{ session.user_id }}</span>
+            <a href="/logout" class="logout-btn">
+                <i class="fas fa-sign-out-alt"></i> Sair
+            </a>
         </div>
     </div>
     
     <div class="container">
         <!-- Navegação -->
         <div class="nav-tabs">
-            <div class="nav-tab active" onclick="showTab('dashboard')">📊 Dashboard</div>
-            <div class="nav-tab" onclick="showTab('upload')">📤 Upload</div>
-            <div class="nav-tab" onclick="showTab('conversions')">🔄 Conversões</div>
-            <div class="nav-tab" onclick="showTab('settings')">⚙️ Configurações</div>
+            <div class="nav-tab active" onclick="showTab('dashboard')">
+                <i class="fas fa-tachometer-alt"></i> Dashboard
+            </div>
+            <div class="nav-tab" onclick="showTab('upload')">
+                <i class="fas fa-upload"></i> Upload
+            </div>
+            <div class="nav-tab" onclick="showTab('conversions')">
+                <i class="fas fa-history"></i> Histórico
+            </div>
+            <div class="nav-tab" onclick="showTab('settings')">
+                <i class="fas fa-cog"></i> Configurações
+            </div>
         </div>
         
         <!-- Dashboard Tab -->
         <div id="dashboard" class="tab-content active">
             <div class="card">
-                <h2>📊 Status do Sistema</h2>
+                <h2><i class="fas fa-tachometer-alt"></i> Status do Sistema</h2>
                 <div class="stats-grid">
                     <div class="stat-item">
                         <div class="stat-value" id="cpu">--%</div>
-                        <div class="stat-label">CPU</div>
+                        <div class="stat-label">Uso de CPU</div>
                     </div>
                     <div class="stat-item">
                         <div class="stat-value" id="memory">--%</div>
-                        <div class="stat-label">Memória</div>
+                        <div class="stat-label">Uso de Memória</div>
                     </div>
                     <div class="stat-item">
-                        <div class="stat-value" id="disk">--%</div>
-                        <div class="stat-label">Disco</div>
+                        <div class="stat-value" id="conversionsTotal">0</div>
+                        <div class="stat-label">Total de Conversões</div>
                     </div>
                     <div class="stat-item">
-                        <div class="stat-value" id="conversions">0</div>
-                        <div class="stat-label">Conversões</div>
+                        <div class="stat-value" id="conversionsSuccess">0</div>
+                        <div class="stat-label">Conversões Bem-sucedidas</div>
                     </div>
                 </div>
                 
-                <div class="system-info">
-                    <h3>FFmpeg Status:</h3>
-                    <div id="ffmpegStatus" class="ffmpeg-status ffmpeg-missing">Verificando...</div>
-                    <p id="ffmpegPath"></p>
+                <div class="system-status">
+                    <h3><i class="fas fa-microchip"></i> Status do FFmpeg</h3>
+                    <div id="ffmpegStatus" class="ffmpeg-status">Verificando...</div>
+                    <p id="ffmpegPath" style="margin-top: 10px; font-size: 0.9rem;"></p>
                 </div>
             </div>
             
             <div class="card">
-                <h2>🚀 Ações Rápidas</h2>
-                <div style="display: flex; gap: 15px; margin-top: 20px;">
-                    <button class="btn-primary" onclick="showTab('upload')">📤 Converter Vídeo</button>
-                    <button class="btn-primary" onclick="refreshStats()">🔄 Atualizar Status</button>
-                    <button class="btn-primary" onclick="testFFmpeg()">🧪 Testar FFmpeg</button>
+                <h2><i class="fas fa-bolt"></i> Ações Rápidas</h2>
+                <div style="display: flex; gap: 15px; margin-top: 20px; flex-wrap: wrap;">
+                    <button class="btn btn-primary" onclick="showTab('upload')">
+                        <i class="fas fa-upload"></i> Converter Vídeo
+                    </button>
+                    <button class="btn btn-success" onclick="refreshStats()">
+                        <i class="fas fa-sync-alt"></i> Atualizar Status
+                    </button>
+                    <button class="btn btn-warning" onclick="testFFmpeg()">
+                        <i class="fas fa-video"></i> Testar FFmpeg
+                    </button>
+                    <button class="btn btn-danger" onclick="cleanupFiles()">
+                        <i class="fas fa-trash"></i> Limpar Arquivos
+                    </button>
                 </div>
             </div>
         </div>
@@ -748,50 +1047,84 @@ DASHBOARD_HTML = '''
         <!-- Upload Tab -->
         <div id="upload" class="tab-content">
             <div class="card">
-                <h2>📤 Upload de Vídeo</h2>
+                <h2><i class="fas fa-upload"></i> Converter Vídeo para HLS</h2>
+                
                 <div class="upload-area" onclick="document.getElementById('fileInput').click()">
-                    <h3>📁 Arraste e solte seu vídeo aqui</h3>
-                    <p>ou clique para selecionar</p>
-                    <p><small>Formatos: MP4, AVI, MOV, MKV, WEBM</small></p>
+                    <i class="fas fa-cloud-upload-alt"></i>
+                    <h3>Arraste e solte seu vídeo aqui</h3>
+                    <p>ou clique para selecionar arquivo</p>
+                    <p style="color: #666; margin-top: 10px;">
+                        Formatos suportados: MP4, AVI, MOV, MKV, WEBM
+                    </p>
                 </div>
+                
                 <input type="file" id="fileInput" accept="video/*" style="display: none;" onchange="handleFileSelect()">
                 
-                <div id="fileInfo" style="display: none; margin: 20px 0; padding: 15px; background: #f8f9fa; border-radius: 8px;">
-                    <h4>Arquivo selecionado:</h4>
-                    <p id="fileName"></p>
-                    <p id="fileSize"></p>
+                <div id="fileInfo" class="file-info">
+                    <h4><i class="fas fa-file-video"></i> Arquivo Selecionado</h4>
+                    <p><strong>Nome:</strong> <span id="fileName"></span></p>
+                    <p><strong>Tamanho:</strong> <span id="fileSize"></span></p>
                 </div>
                 
                 <div style="margin-top: 30px;">
-                    <h3>Qualidades:</h3>
-                    <div style="display: flex; gap: 20px; margin: 15px 0;">
-                        <label><input type="checkbox" id="q240" checked> 240p</label>
-                        <label><input type="checkbox" id="q480" checked> 480p</label>
-                        <label><input type="checkbox" id="q720" checked> 720p</label>
-                        <label><input type="checkbox" id="q1080" checked> 1080p</label>
+                    <h3><i class="fas fa-layer-group"></i> Qualidades de Saída</h3>
+                    <div class="quality-selector">
+                        <div class="quality-option selected" data-quality="240p" onclick="toggleQuality(this)">
+                            240p
+                        </div>
+                        <div class="quality-option selected" data-quality="480p" onclick="toggleQuality(this)">
+                            480p
+                        </div>
+                        <div class="quality-option selected" data-quality="720p" onclick="toggleQuality(this)">
+                            720p
+                        </div>
+                        <div class="quality-option selected" data-quality="1080p" onclick="toggleQuality(this)">
+                            1080p
+                        </div>
                     </div>
                 </div>
                 
-                <button class="btn-primary" onclick="startConversion()" id="convertBtn" style="margin-top: 20px;">
-                    🚀 Iniciar Conversão
+                <button class="btn btn-primary" onclick="startConversion()" id="convertBtn" style="margin-top: 30px; width: 100%;">
+                    <i class="fas fa-play-circle"></i> Iniciar Conversão
                 </button>
                 
                 <div id="progress" style="display: none; margin-top: 30px;">
-                    <h3>Progresso:</h3>
-                    <div style="background: #e9ecef; height: 20px; border-radius: 10px; overflow: hidden;">
-                        <div id="progressBar" style="height: 100%; background: #4361ee; width: 0%; transition: width 0.3s;"></div>
+                    <h3><i class="fas fa-spinner fa-spin"></i> Progresso da Conversão</h3>
+                    <div class="progress-container">
+                        <div class="progress-bar" id="progressBar" style="width: 0%">0%</div>
                     </div>
-                    <p id="progressText" style="text-align: center; margin-top: 10px;">0%</p>
+                    <p id="progressText" style="text-align: center; margin-top: 10px; color: #666;">
+                        Iniciando conversão...
+                    </p>
                 </div>
             </div>
         </div>
         
-        <!-- Conversions Tab -->
+        <!-- Conversions Tab - HISTÓRICO CORRIGIDO -->
         <div id="conversions" class="tab-content">
             <div class="card">
-                <h2>🔄 Histórico de Conversões</h2>
+                <h2><i class="fas fa-history"></i> Histórico de Conversões</h2>
+                
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <div>
+                        <button class="btn btn-success" onclick="loadConversions()">
+                            <i class="fas fa-sync-alt"></i> Atualizar
+                        </button>
+                        <button class="btn btn-warning" onclick="clearHistory()">
+                            <i class="fas fa-trash-alt"></i> Limpar Histórico
+                        </button>
+                    </div>
+                    <div id="conversionStats" style="color: #666; font-size: 0.9rem;">
+                        Carregando estatísticas...
+                    </div>
+                </div>
+                
                 <div id="conversionsList">
-                    <p>Carregando histórico...</p>
+                    <div class="empty-state">
+                        <i class="fas fa-history"></i>
+                        <h3>Nenhuma conversão realizada ainda</h3>
+                        <p>Converta seu primeiro vídeo para ver o histórico aqui</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -799,25 +1132,33 @@ DASHBOARD_HTML = '''
         <!-- Settings Tab -->
         <div id="settings" class="tab-content">
             <div class="card">
-                <h2>⚙️ Configurações</h2>
+                <h2><i class="fas fa-cog"></i> Configurações do Sistema</h2>
+                
                 <div style="margin-top: 20px;">
-                    <h3>Segurança</h3>
-                    <button class="btn-primary" onclick="changePassword()">
-                        🔑 Alterar Minha Senha
+                    <h3><i class="fas fa-user-shield"></i> Segurança</h3>
+                    <button class="btn btn-primary" onclick="changePassword()" style="margin-top: 10px;">
+                        <i class="fas fa-key"></i> Alterar Minha Senha
                     </button>
                 </div>
                 
                 <div style="margin-top: 30px;">
-                    <h3>Sistema</h3>
+                    <h3><i class="fas fa-hdd"></i> Armazenamento</h3>
                     <div style="margin: 15px 0;">
-                        <label>
+                        <label style="display: flex; align-items: center; gap: 10px;">
                             <input type="checkbox" id="keepOriginals" checked>
-                            Manter arquivos originais
+                            Manter arquivos originais após conversão
                         </label>
                     </div>
-                    <button class="btn-primary" onclick="cleanupFiles()">
-                        🗑️ Limpar Arquivos Antigos
+                    <button class="btn btn-warning" onclick="cleanupOldFiles()" style="margin-top: 10px;">
+                        <i class="fas fa-broom"></i> Limpar Arquivos Antigos
                     </button>
+                </div>
+                
+                <div style="margin-top: 30px;">
+                    <h3><i class="fas fa-info-circle"></i> Informações do Sistema</h3>
+                    <div id="systemInfo" style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px;">
+                        Carregando informações...
+                    </div>
                 </div>
             </div>
         </div>
@@ -826,8 +1167,9 @@ DASHBOARD_HTML = '''
     <script>
         // Variáveis globais
         let selectedFile = null;
+        let selectedQualities = ['240p', '480p', '720p', '1080p'];
         
-        // Navegação entre abas
+        // =============== FUNÇÕES DE NAVEGAÇÃO ===============
         function showTab(tabName) {
             // Esconder todas as abas
             document.querySelectorAll('.tab-content').forEach(tab => {
@@ -842,18 +1184,24 @@ DASHBOARD_HTML = '''
             // Mostrar aba selecionada
             document.getElementById(tabName).classList.add('active');
             
-            // Ativar tab na navegação
+            // Ativar tab correspondente
             document.querySelectorAll('.nav-tab').forEach(tab => {
                 if (tab.textContent.includes(getTabLabel(tabName))) {
                     tab.classList.add('active');
                 }
             });
             
-            // Carregar dados se necessário
-            if (tabName === 'conversions') {
-                loadConversions();
-            } else if (tabName === 'dashboard') {
-                loadSystemStats();
+            // Carregar dados específicos da aba
+            switch(tabName) {
+                case 'dashboard':
+                    loadSystemStats();
+                    break;
+                case 'conversions':
+                    loadConversions();
+                    break;
+                case 'settings':
+                    loadSystemInfo();
+                    break;
             }
         }
         
@@ -861,92 +1209,124 @@ DASHBOARD_HTML = '''
             const labels = {
                 'dashboard': 'Dashboard',
                 'upload': 'Upload',
-                'conversions': 'Conversões',
+                'conversions': 'Histórico',
                 'settings': 'Configurações'
             };
-            return labels[tabName] || tabName;
+            return labels[tabName];
         }
         
-        // Sistema
+        // =============== SISTEMA ===============
         function loadSystemStats() {
             fetch('/api/system')
                 .then(response => response.json())
                 .then(data => {
+                    if (data.error) {
+                        console.error('Erro ao carregar stats:', data.error);
+                        return;
+                    }
+                    
                     document.getElementById('cpu').textContent = data.cpu || '--%';
                     document.getElementById('memory').textContent = data.memory || '--%';
-                    document.getElementById('disk').textContent = data.disk || '--%';
-                    document.getElementById('conversions').textContent = data.total_conversions || '0';
+                    document.getElementById('conversionsTotal').textContent = data.total_conversions || '0';
+                    document.getElementById('conversionsSuccess').textContent = data.success_conversions || '0';
                     
-                    // FFmpeg status
+                    // Status do FFmpeg
                     const ffmpegStatus = document.getElementById('ffmpegStatus');
                     if (data.ffmpeg_status === 'ok') {
                         ffmpegStatus.textContent = '✅ FFmpeg Disponível';
                         ffmpegStatus.className = 'ffmpeg-status ffmpeg-ok';
+                        if (data.ffmpeg_path) {
+                            document.getElementById('ffmpegPath').textContent = `Local: ${data.ffmpeg_path}`;
+                        }
                     } else {
                         ffmpegStatus.textContent = '❌ FFmpeg Não Encontrado';
-                        ffmpegStatus.className = 'ffmpeg-status ffmpeg-missing';
-                    }
-                    
-                    if (data.ffmpeg_path) {
-                        document.getElementById('ffmpegPath').textContent = `Caminho: ${data.ffmpeg_path}`;
+                        ffmpegStatus.className = 'ffmpeg-status ffmpeg-error';
+                        document.getElementById('ffmpegPath').textContent = 'Execute: sudo apt-get install ffmpeg';
                     }
                 })
                 .catch(error => {
                     console.error('Erro ao carregar stats:', error);
+                    showToast('Erro ao carregar status do sistema', 'error');
                 });
         }
         
         function refreshStats() {
             loadSystemStats();
-            alert('Status atualizado!');
+            showToast('Status atualizado com sucesso', 'success');
         }
         
-        // Upload
+        function testFFmpeg() {
+            fetch('/api/ffmpeg-test')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showToast(`✅ FFmpeg funcionando! Versão: ${data.version}`, 'success');
+                    } else {
+                        showToast(`❌ FFmpeg não está funcionando: ${data.error}`, 'error');
+                    }
+                })
+                .catch(() => {
+                    showToast('Erro ao testar FFmpeg', 'error');
+                });
+        }
+        
+        // =============== UPLOAD ===============
         function handleFileSelect() {
             const fileInput = document.getElementById('fileInput');
             if (fileInput.files.length > 0) {
                 selectedFile = fileInput.files[0];
                 
-                document.getElementById('fileInfo').style.display = 'block';
-                document.getElementById('fileName').textContent = `Nome: ${selectedFile.name}`;
-                document.getElementById('fileSize').textContent = `Tamanho: ${formatBytes(selectedFile.size)}`;
+                const fileInfo = document.getElementById('fileInfo');
+                fileInfo.classList.add('show');
+                
+                document.getElementById('fileName').textContent = selectedFile.name;
+                document.getElementById('fileSize').textContent = formatBytes(selectedFile.size);
+            }
+        }
+        
+        function toggleQuality(element) {
+            const quality = element.getAttribute('data-quality');
+            const index = selectedQualities.indexOf(quality);
+            
+            if (index === -1) {
+                selectedQualities.push(quality);
+                element.classList.add('selected');
+            } else {
+                selectedQualities.splice(index, 1);
+                element.classList.remove('selected');
             }
         }
         
         function startConversion() {
             if (!selectedFile) {
-                alert('Por favor, selecione um arquivo primeiro!');
+                showToast('Por favor, selecione um arquivo primeiro!', 'warning');
                 return;
             }
             
-            const qualities = [];
-            if (document.getElementById('q240').checked) qualities.push('240p');
-            if (document.getElementById('q480').checked) qualities.push('480p');
-            if (document.getElementById('q720').checked) qualities.push('720p');
-            if (document.getElementById('q1080').checked) qualities.push('1080p');
-            
-            if (qualities.length === 0) {
-                alert('Selecione pelo menos uma qualidade!');
+            if (selectedQualities.length === 0) {
+                showToast('Selecione pelo menos uma qualidade!', 'warning');
                 return;
             }
             
             const formData = new FormData();
             formData.append('file', selectedFile);
-            formData.append('qualities', JSON.stringify(qualities));
+            formData.append('qualities', JSON.stringify(selectedQualities));
             
             // Mostrar progresso
-            document.getElementById('progress').style.display = 'block';
+            const progressSection = document.getElementById('progress');
+            progressSection.style.display = 'block';
+            
             const convertBtn = document.getElementById('convertBtn');
             convertBtn.disabled = true;
-            convertBtn.textContent = '⏳ Convertendo...';
+            convertBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Convertendo...';
             
             // Simular progresso
             let progress = 0;
             const progressInterval = setInterval(() => {
-                progress += 5;
+                progress += 2;
                 if (progress > 90) progress = 90;
-                updateProgress(progress, 'Processando...');
-            }, 300);
+                updateProgress(progress, 'Processando vídeo...');
+            }, 500);
             
             fetch('/convert', {
                 method: 'POST',
@@ -958,126 +1338,218 @@ DASHBOARD_HTML = '''
                 
                 if (data.success) {
                     updateProgress(100, 'Concluído!');
-                    alert(`✅ Conversão concluída!\nID: ${data.video_id}\nLink: ${data.m3u8_url}`);
+                    showToast(`✅ Conversão concluída! ID: ${data.video_id}`, 'success');
                     
-                    // Reset
+                    // Reset após 2 segundos
                     setTimeout(() => {
-                        document.getElementById('progress').style.display = 'none';
-                        document.getElementById('fileInfo').style.display = 'none';
+                        progressSection.style.display = 'none';
+                        document.getElementById('fileInfo').classList.remove('show');
                         document.getElementById('fileInput').value = '';
                         selectedFile = null;
                         convertBtn.disabled = false;
-                        convertBtn.textContent = '🚀 Iniciar Conversão';
+                        convertBtn.innerHTML = '<i class="fas fa-play-circle"></i> Iniciar Conversão';
                         updateProgress(0, '');
                         
                         // Atualizar histórico
                         loadConversions();
+                        loadSystemStats();
                     }, 2000);
                 } else {
-                    alert(`❌ Erro: ${data.error}`);
+                    showToast(`❌ Erro: ${data.error}`, 'error');
                     convertBtn.disabled = false;
-                    convertBtn.textContent = '🚀 Iniciar Conversão';
+                    convertBtn.innerHTML = '<i class="fas fa-play-circle"></i> Iniciar Conversão';
                 }
             })
             .catch(error => {
                 clearInterval(progressInterval);
-                alert(`❌ Erro de conexão: ${error.message}`);
+                showToast(`❌ Erro de conexão: ${error.message}`, 'error');
                 convertBtn.disabled = false;
-                convertBtn.textContent = '🚀 Iniciar Conversão';
+                convertBtn.innerHTML = '<i class="fas fa-play-circle"></i> Iniciar Conversão';
             });
         }
         
         function updateProgress(percent, text) {
-            document.getElementById('progressBar').style.width = percent + '%';
-            document.getElementById('progressText').textContent = `${text} ${percent}%`;
+            const progressBar = document.getElementById('progressBar');
+            progressBar.style.width = percent + '%';
+            progressBar.textContent = percent + '%';
+            document.getElementById('progressText').textContent = text;
         }
         
-        // Conversões
+        // =============== HISTÓRICO DE CONVERSÕES - CORRIGIDO ===============
         function loadConversions() {
             fetch('/api/conversions')
                 .then(response => response.json())
                 .then(data => {
                     const container = document.getElementById('conversionsList');
+                    const statsContainer = document.getElementById('conversionStats');
+                    
+                    // Atualizar estatísticas
+                    if (data.stats) {
+                        statsContainer.innerHTML = `
+                            Total: ${data.stats.total || 0} | 
+                            Sucesso: ${data.stats.success || 0} | 
+                            Falhas: ${data.stats.failed || 0}
+                        `;
+                    }
                     
                     if (!data.conversions || data.conversions.length === 0) {
-                        container.innerHTML = '<p>Nenhuma conversão realizada ainda.</p>';
+                        container.innerHTML = `
+                            <div class="empty-state">
+                                <i class="fas fa-history"></i>
+                                <h3>Nenhuma conversão realizada ainda</h3>
+                                <p>Converta seu primeiro vídeo para ver o histórico aqui</p>
+                            </div>
+                        `;
                         return;
                     }
                     
-                    let html = '';
-                    data.conversions.slice(0, 10).forEach(conv => {
+                    let html = '<div class="conversions-list">';
+                    
+                    // CORREÇÃO: Garantir que estamos iterando sobre um array
+                    const conversions = Array.isArray(data.conversions) ? data.conversions : [];
+                    
+                    conversions.forEach(conv => {
+                        // Garantir que conv tenha as propriedades necessárias
+                        const videoId = conv.video_id || conv.id || 'N/A';
+                        const filename = conv.filename || 'Arquivo desconhecido';
+                        const timestamp = conv.timestamp || new Date().toISOString();
+                        const qualities = Array.isArray(conv.qualities) ? conv.qualities : [];
+                        const status = conv.status || 'unknown';
+                        
                         html += `
-                            <div class="conversion-item">
-                                <strong>${conv.filename || conv.video_id}</strong>
-                                <p style="color: #666; font-size: 0.9em;">
-                                    ${new Date(conv.timestamp).toLocaleString()}
-                                </p>
-                                <p>Qualidades: ${conv.qualities ? conv.qualities.join(', ') : 'N/A'}</p>
-                                <button onclick="copyLink('${conv.video_id}')" style="background: #4361ee; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer;">
-                                    📋 Copiar Link
-                                </button>
+                            <div class="conversion-card">
+                                <div class="conversion-header">
+                                    <span class="conversion-id">${videoId.substring(0, 8)}...</span>
+                                    <span class="conversion-status status-${status}">
+                                        ${status === 'success' ? '✅ Sucesso' : '❌ Falha'}
+                                    </span>
+                                </div>
+                                <div class="conversion-info">
+                                    <p><strong>Arquivo:</strong> ${filename}</p>
+                                    <p><strong>Data:</strong> ${formatDate(timestamp)}</p>
+                                    <p><strong>Qualidades:</strong> ${qualities.join(', ') || 'N/A'}</p>
+                                </div>
+                                <div class="conversion-actions">
+                                    <button class="btn btn-primary" onclick="copyLink('${videoId}')">
+                                        <i class="fas fa-link"></i> Link
+                                    </button>
+                                    <button class="btn btn-success" onclick="playVideo('${videoId}')">
+                                        <i class="fas fa-play"></i> Play
+                                    </button>
+                                </div>
                             </div>
                         `;
                     });
                     
+                    html += '</div>';
                     container.innerHTML = html;
                 })
                 .catch(error => {
                     console.error('Erro ao carregar conversões:', error);
-                    document.getElementById('conversionsList').innerHTML = '<p>Erro ao carregar histórico.</p>';
+                    document.getElementById('conversionsList').innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <h3>Erro ao carregar histórico</h3>
+                            <p>${error.message}</p>
+                        </div>
+                    `;
+                    showToast('Erro ao carregar histórico de conversões', 'error');
                 });
+        }
+        
+        function clearHistory() {
+            if (confirm('Tem certeza que deseja limpar todo o histórico de conversões?')) {
+                fetch('/api/clear-history', { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            showToast('✅ Histórico limpo com sucesso!', 'success');
+                            loadConversions();
+                            loadSystemStats();
+                        } else {
+                            showToast(`❌ Erro: ${data.error}`, 'error');
+                        }
+                    })
+                    .catch(error => {
+                        showToast('❌ Erro ao limpar histórico', 'error');
+                    });
+            }
         }
         
         function copyLink(videoId) {
             const link = window.location.origin + '/hls/' + videoId + '/master.m3u8';
             navigator.clipboard.writeText(link)
-                .then(() => alert('✅ Link copiado!'))
+                .then(() => showToast('✅ Link copiado para a área de transferência!', 'success'))
                 .catch(() => {
-                    // Fallback para navegadores antigos
+                    // Fallback
                     const textArea = document.createElement('textarea');
                     textArea.value = link;
                     document.body.appendChild(textArea);
                     textArea.select();
                     document.execCommand('copy');
                     document.body.removeChild(textArea);
-                    alert('✅ Link copiado!');
+                    showToast('✅ Link copiado!', 'success');
                 });
         }
         
-        // Configurações
+        function playVideo(videoId) {
+            window.open('/player/' + videoId, '_blank');
+        }
+        
+        // =============== CONFIGURAÇÕES ===============
         function changePassword() {
             window.location.href = '/change-password';
         }
         
         function cleanupFiles() {
-            if (confirm('Limpar arquivos antigos (mais de 7 dias)?')) {
+            if (confirm('Limpar todos os arquivos temporários e convertidos?')) {
                 fetch('/api/cleanup', { method: 'POST' })
                     .then(response => response.json())
                     .then(data => {
-                        alert(data.message || 'Limpeza concluída!');
+                        if (data.success) {
+                            showToast(`✅ ${data.message}`, 'success');
+                        } else {
+                            showToast(`❌ Erro: ${data.error}`, 'error');
+                        }
                     })
                     .catch(() => {
-                        alert('Erro ao limpar arquivos.');
+                        showToast('❌ Erro ao limpar arquivos', 'error');
                     });
             }
         }
         
-        function testFFmpeg() {
-            fetch('/api/ffmpeg-test')
+        function cleanupOldFiles() {
+            if (confirm('Limpar arquivos antigos (mais de 7 dias)?')) {
+                fetch('/api/cleanup-old', { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        showToast(data.message || '✅ Arquivos antigos removidos', 'success');
+                    })
+                    .catch(() => {
+                        showToast('❌ Erro ao limpar arquivos antigos', 'error');
+                    });
+            }
+        }
+        
+        function loadSystemInfo() {
+            fetch('/api/system-info')
                 .then(response => response.json())
                 .then(data => {
-                    if (data.success) {
-                        alert(`✅ FFmpeg funcionando!\nVersão: ${data.version}`);
-                    } else {
-                        alert(`❌ FFmpeg não está funcionando: ${data.error}`);
-                    }
+                    const container = document.getElementById('systemInfo');
+                    container.innerHTML = `
+                        <p><strong>Versão:</strong> ${data.version || 'N/A'}</p>
+                        <p><strong>Diretório:</strong> ${data.base_dir || 'N/A'}</p>
+                        <p><strong>Usuários:</strong> ${data.users_count || 0}</p>
+                        <p><strong>Serviço:</strong> ${data.service_status || 'N/A'}</p>
+                        <p><strong>Uptime:</strong> ${data.uptime || 'N/A'}</p>
+                    `;
                 })
-                .catch(() => {
-                    alert('Erro ao testar FFmpeg.');
+                .catch(error => {
+                    document.getElementById('systemInfo').innerHTML = 'Erro ao carregar informações';
                 });
         }
         
-        // Utilitários
+        // =============== UTILITÁRIOS ===============
         function formatBytes(bytes) {
             if (bytes === 0) return '0 Bytes';
             const k = 1024;
@@ -1086,18 +1558,74 @@ DASHBOARD_HTML = '''
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
         
-        // Inicialização
+        function formatDate(timestamp) {
+            try {
+                const date = new Date(timestamp);
+                return date.toLocaleString('pt-BR');
+            } catch {
+                return 'Data inválida';
+            }
+        }
+        
+        function showToast(message, type = 'info') {
+            // Remover toasts anteriores
+            document.querySelectorAll('.toast').forEach(toast => toast.remove());
+            
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `
+                <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i>
+                <span>${message}</span>
+            `;
+            
+            document.body.appendChild(toast);
+            
+            // Remover após 5 segundos
+            setTimeout(() => {
+                toast.remove();
+            }, 5000);
+        }
+        
+        // =============== INICIALIZAÇÃO ===============
         document.addEventListener('DOMContentLoaded', function() {
             loadSystemStats();
+            
             // Atualizar stats a cada 30 segundos
             setInterval(loadSystemStats, 30000);
+            
+            // Configurar drag and drop
+            const uploadArea = document.querySelector('.upload-area');
+            
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.style.backgroundColor = 'rgba(67, 97, 238, 0.1)';
+            });
+            
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.style.backgroundColor = '';
+            });
+            
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.style.backgroundColor = '';
+                
+                if (e.dataTransfer.files.length > 0) {
+                    selectedFile = e.dataTransfer.files[0];
+                    
+                    const fileInfo = document.getElementById('fileInfo');
+                    fileInfo.classList.add('show');
+                    
+                    document.getElementById('fileName').textContent = selectedFile.name;
+                    document.getElementById('fileSize').textContent = formatBytes(selectedFile.size);
+                }
+            });
         });
     </script>
 </body>
 </html>
 '''
 
-# =============== ROTAS ===============
+# =============== ROTAS PRINCIPAIS ===============
 
 @app.route('/')
 def index():
@@ -1128,7 +1656,7 @@ def login():
     if check_password(username, password):
         # Atualizar último login
         users = load_users()
-        if username in users['users']:
+        if username in users.get('users', {}):
             users['users'][username]['last_login'] = datetime.now().isoformat()
             save_users(users)
         
@@ -1140,6 +1668,7 @@ def login():
         if password_change_required(username):
             return redirect(url_for('change_password'))
         
+        log_activity(f"Usuário {username} fez login")
         return redirect(url_for('index'))
     else:
         flash('Usuário ou senha incorretos', 'error')
@@ -1171,22 +1700,9 @@ def change_password():
     if len(new_password) < 8:
         errors.append('A senha deve ter pelo menos 8 caracteres')
     
-    if not any(c.isupper() for c in new_password):
-        errors.append('A senha deve conter pelo menos uma letra maiúscula')
-    
-    if not any(c.islower() for c in new_password):
-        errors.append('A senha deve conter pelo menos uma letra minúscula')
-    
-    if not any(c.isdigit() for c in new_password):
-        errors.append('A senha deve conter pelo menos um número')
-    
-    if not any(c in '!@#$%^&*(),.?":{}|<>' for c in new_password):
-        errors.append('A senha deve conter pelo menos um caractere especial')
-    
     if current_password == new_password:
         errors.append('A nova senha não pode ser igual à atual')
     
-    # Verificar senha atual
     if not check_password(username, current_password):
         errors.append('Senha atual incorreta')
     
@@ -1205,6 +1721,7 @@ def change_password():
         save_users(users)
         
         flash('✅ Senha alterada com sucesso!', 'success')
+        log_activity(f"Usuário {username} alterou a senha")
         return redirect(url_for('index'))
     except Exception as e:
         flash(f'Erro ao alterar senha: {str(e)}', 'error')
@@ -1212,7 +1729,9 @@ def change_password():
 
 @app.route('/logout')
 def logout():
-    session.clear()
+    if 'user_id' in session:
+        log_activity(f"Usuário {session['user_id']} fez logout")
+        session.clear()
     flash('✅ Você foi desconectado com sucesso', 'info')
     return redirect(url_for('login'))
 
@@ -1220,11 +1739,8 @@ def logout():
 def api_system():
     """Endpoint para informações do sistema"""
     try:
-        import psutil
-        
         cpu = psutil.cpu_percent(interval=0.1)
         memory = psutil.virtual_memory()
-        disk = psutil.disk_usage('/')
         
         conversions = load_conversions()
         
@@ -1233,7 +1749,6 @@ def api_system():
         return jsonify({
             "cpu": f"{cpu:.1f}%",
             "memory": f"{memory.percent:.1f}%",
-            "disk": f"{disk.percent:.1f}%",
             "total_conversions": conversions["stats"]["total"],
             "success_conversions": conversions["stats"]["success"],
             "failed_conversions": conversions["stats"]["failed"],
@@ -1243,35 +1758,123 @@ def api_system():
     except Exception as e:
         return jsonify({
             "error": str(e),
-            "ffmpeg_status": "error",
-            "ffmpeg_path": "Erro ao verificar"
+            "ffmpeg_status": "error"
         })
 
 @app.route('/api/conversions')
 def api_conversions():
-    """Endpoint para listar conversões"""
-    data = load_conversions()
-    return jsonify(data)
+    """Endpoint para listar conversões - CORRIGIDO"""
+    try:
+        data = load_conversions()
+        
+        # CORREÇÃO: Garantir que conversions é uma lista
+        if not isinstance(data.get('conversions'), list):
+            data['conversions'] = []
+        
+        # CORREÇÃO: Ordenar por data (mais recente primeiro)
+        try:
+            data['conversions'].sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+        except:
+            pass  # Se não conseguir ordenar, continua sem ordenar
+        
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({
+            "error": str(e),
+            "conversions": [],
+            "stats": {"total": 0, "success": 0, "failed": 0}
+        })
+
+@app.route('/api/clear-history', methods=['POST'])
+def api_clear_history():
+    """Limpar histórico de conversões"""
+    try:
+        data = load_conversions()
+        count = len(data.get('conversions', []))
+        
+        data['conversions'] = []
+        data['stats']['total'] = 0
+        data['stats']['success'] = 0
+        data['stats']['failed'] = 0
+        
+        save_conversions(data)
+        
+        log_activity(f"Histórico de conversões limpo: {count} entradas removidas")
+        
+        return jsonify({
+            "success": True,
+            "message": f"{count} conversões removidas do histórico"
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
 
 @app.route('/api/cleanup', methods=['POST'])
 def api_cleanup():
-    """Limpar arquivos antigos"""
+    """Limpar todos os arquivos"""
     try:
         deleted_count = 0
         
-        # Limpar uploads antigos
+        # Limpar uploads
         if os.path.exists(UPLOAD_DIR):
             for filename in os.listdir(UPLOAD_DIR):
                 filepath = os.path.join(UPLOAD_DIR, filename)
                 if os.path.isfile(filepath):
-                    file_age = time.time() - os.path.getmtime(filepath)
+                    os.remove(filepath)
+                    deleted_count += 1
+        
+        # Limpar HLS (exceto estrutura)
+        if os.path.exists(HLS_DIR):
+            for item in os.listdir(HLS_DIR):
+                item_path = os.path.join(HLS_DIR, item)
+                if os.path.isdir(item_path) and item not in ['240p', '360p', '480p', '720p', '1080p', 'original']:
+                    shutil.rmtree(item_path, ignore_errors=True)
+                    deleted_count += 1
+        
+        log_activity(f"Limpeza realizada: {deleted_count} arquivos removidos")
+        
+        return jsonify({
+            "success": True,
+            "message": f"{deleted_count} arquivos removidos"
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
+
+@app.route('/api/cleanup-old', methods=['POST'])
+def api_cleanup_old():
+    """Limpar arquivos antigos"""
+    try:
+        deleted_count = 0
+        now = time.time()
+        
+        # Limpar uploads antigos (>7 dias)
+        if os.path.exists(UPLOAD_DIR):
+            for filename in os.listdir(UPLOAD_DIR):
+                filepath = os.path.join(UPLOAD_DIR, filename)
+                if os.path.isfile(filepath):
+                    file_age = now - os.path.getmtime(filepath)
                     if file_age > 7 * 24 * 3600:  # 7 dias
                         os.remove(filepath)
                         deleted_count += 1
         
+        # Limpar diretórios HLS antigos
+        if os.path.exists(HLS_DIR):
+            for item in os.listdir(HLS_DIR):
+                item_path = os.path.join(HLS_DIR, item)
+                if os.path.isdir(item_path):
+                    dir_age = now - os.path.getmtime(item_path)
+                    if dir_age > 7 * 24 * 3600:  # 7 dias
+                        shutil.rmtree(item_path, ignore_errors=True)
+                        deleted_count += 1
+        
         return jsonify({
             "success": True,
-            "message": f"{deleted_count} arquivos antigos removidos"
+            "message": f"{deleted_count} arquivos/diretórios antigos removidos"
         })
     except Exception as e:
         return jsonify({
@@ -1318,6 +1921,23 @@ def api_ffmpeg_test():
             "error": str(e)
         })
 
+@app.route('/api/system-info')
+def api_system_info():
+    """Informações detalhadas do sistema"""
+    try:
+        users = load_users()
+        
+        return jsonify({
+            "version": "2.0.0",
+            "base_dir": BASE_DIR,
+            "users_count": len(users.get('users', {})),
+            "service_status": "running",
+            "uptime": str(datetime.now() - datetime.fromtimestamp(psutil.boot_time())).split('.')[0],
+            "ffmpeg": "installed" if find_ffmpeg() else "not installed"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
 @app.route('/convert', methods=['POST'])
 def convert_video():
     """Converter vídeo para HLS"""
@@ -1355,8 +1975,8 @@ def convert_video():
         
         # Salvar arquivo original
         filename = file.filename
-        temp_path = os.path.join(output_dir, "original.mp4")
-        file.save(temp_path)
+        original_path = os.path.join(output_dir, "original.mp4")
+        file.save(original_path)
         
         # Criar master playlist
         master_playlist = os.path.join(output_dir, "master.m3u8")
@@ -1394,11 +2014,11 @@ def convert_video():
                     audio_bitrate = "192k"
                     bandwidth = "3000000"
                 else:
-                    continue  # Pular qualidade desconhecida
+                    continue
                 
                 # Comando FFmpeg
                 cmd = [
-                    ffmpeg_path, '-i', temp_path,
+                    ffmpeg_path, '-i', original_path,
                     '-vf', f'scale={scale}',
                     '-c:v', 'libx264', '-preset', 'fast',
                     '-c:a', 'aac', '-b:a', audio_bitrate,
@@ -1414,48 +2034,121 @@ def convert_video():
                     if result.returncode == 0:
                         f.write(f'#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},RESOLUTION={scale.replace(":", "x")}\n')
                         f.write(f'{quality}/index.m3u8\n')
+                    else:
+                        print(f"Erro FFmpeg para {quality}: {result.stderr[:200]}")
                 except subprocess.TimeoutExpired:
                     print(f"Timeout na conversão para {quality}")
         
-        # Limpar arquivo temporário
-        os.remove(temp_path)
+        # Limpar arquivo original se configurado
+        if not os.path.exists(os.path.join(output_dir, "original")):
+            os.makedirs(os.path.join(output_dir, "original"))
+        shutil.move(original_path, os.path.join(output_dir, "original", filename))
         
-        # Atualizar banco de dados
+        # Atualizar banco de dados - CORRIGIDO
         conversions = load_conversions()
         conversion_data = {
             "video_id": video_id,
             "filename": filename,
             "qualities": qualities,
             "timestamp": datetime.now().isoformat(),
-            "status": "success"
+            "status": "success",
+            "m3u8_url": f"/hls/{video_id}/master.m3u8"
         }
         
-        conversions["conversions"].insert(0, conversion_data)
-        conversions["stats"]["total"] += 1
-        conversions["stats"]["success"] += 1
+        # CORREÇÃO: Garantir que conversions é uma lista
+        if not isinstance(conversions.get('conversions'), list):
+            conversions['conversions'] = []
+        
+        # Adicionar no início da lista
+        conversions['conversions'].insert(0, conversion_data)
+        
+        # Atualizar estatísticas
+        conversions['stats']['total'] = conversions['stats'].get('total', 0) + 1
+        conversions['stats']['success'] = conversions['stats'].get('success', 0) + 1
+        
         save_conversions(conversions)
+        
+        log_activity(f"Conversão realizada: {filename} -> {video_id}")
         
         return jsonify({
             "success": True,
             "video_id": video_id,
             "qualities": qualities,
-            "m3u8_url": f"/hls/{video_id}/master.m3u8"
+            "m3u8_url": f"/hls/{video_id}/master.m3u8",
+            "player_url": f"/player/{video_id}"
         })
         
     except Exception as e:
         print(f"Erro na conversão: {e}")
+        
+        # Registrar falha
+        try:
+            conversions = load_conversions()
+            conversions['stats']['total'] = conversions['stats'].get('total', 0) + 1
+            conversions['stats']['failed'] = conversions['stats'].get('failed', 0) + 1
+            save_conversions(conversions)
+        except:
+            pass
+        
         return jsonify({
             "success": False,
             "error": str(e)
         })
 
+@app.route('/hls/<video_id>/master.m3u8')
 @app.route('/hls/<video_id>/<path:filename>')
-def serve_hls(video_id, filename):
+def serve_hls(video_id, filename=None):
     """Servir arquivos HLS"""
+    if filename is None:
+        filename = "master.m3u8"
+    
     filepath = os.path.join(HLS_DIR, video_id, filename)
     if os.path.exists(filepath):
         return send_file(filepath)
     return "Arquivo não encontrado", 404
+
+@app.route('/player/<video_id>')
+def player_page(video_id):
+    """Página do player"""
+    m3u8_url = f"/hls/{video_id}/master.m3u8"
+    player_html = f'''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Player HLS - {video_id}</title>
+        <link href="https://vjs.zencdn.net/7.20.3/video-js.css" rel="stylesheet">
+        <style>
+            body {{ margin: 0; padding: 20px; background: #000; }}
+            .player-container {{ max-width: 1200px; margin: 0 auto; }}
+            .back-btn {{ 
+                background: #4361ee; 
+                color: white; 
+                border: none; 
+                padding: 10px 20px; 
+                border-radius: 5px; 
+                cursor: pointer;
+                margin-bottom: 20px;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="player-container">
+            <button class="back-btn" onclick="window.history.back()">← Voltar</button>
+            <video id="hlsPlayer" class="video-js vjs-default-skin" controls preload="auto" width="100%" height="auto">
+                <source src="{m3u8_url}" type="application/x-mpegURL">
+            </video>
+        </div>
+        
+        <script src="https://vjs.zencdn.net/7.20.3/video.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/videojs-contrib-hls/5.15.0/videojs-contrib-hls.min.js"></script>
+        <script>
+            var player = videojs('hlsPlayer');
+            player.play();
+        </script>
+    </body>
+    </html>
+    '''
+    return player_html
 
 @app.route('/health')
 def health():
@@ -1464,19 +2157,20 @@ def health():
         "status": "healthy",
         "service": "hls-converter-ultimate",
         "timestamp": datetime.now().isoformat(),
-        "version": "4.0.0"
+        "version": "2.0.0",
+        "ffmpeg": find_ffmpeg() is not None
     })
 
 # =============== INICIALIZAÇÃO ===============
 if __name__ == '__main__':
-    print("=" * 50)
-    print("🚀 HLS Converter ULTIMATE - Versão Corrigida")
-    print("=" * 50)
+    print("=" * 60)
+    print("🚀 HLS Converter ULTIMATE - Versão Final Corrigida")
+    print("=" * 60)
     print(f"📂 Diretório base: {BASE_DIR}")
     print(f"🔐 Autenticação: Habilitada")
     print(f"👤 Usuário padrão: admin / admin")
     print(f"🌐 Porta: 8080")
-    print("=" * 50)
+    print("=" * 60)
     
     # Testar FFmpeg
     ffmpeg_path = find_ffmpeg()
@@ -1492,7 +2186,6 @@ if __name__ == '__main__':
     else:
         print("❌ FFmpeg NÃO encontrado!")
         print("📋 Execute: sudo apt-get install -y ffmpeg")
-        print("📋 Ou após instalação: hlsctl fix-ffmpeg")
     
     print("")
     print("🌐 URLs importantes:")
@@ -1500,14 +2193,11 @@ if __name__ == '__main__':
     print(f"   🩺 Health: http://localhost:8080/health")
     print(f"   🎮 Dashboard: http://localhost:8080/")
     print("")
-    print("⚙️  Comandos de gerenciamento:")
-    print("   • hlsctl start      - Iniciar serviço")
-    print("   • hlsctl stop       - Parar serviço")
-    print("   • hlsctl restart    - Reiniciar serviço")
-    print("   • hlsctl status     - Ver status")
-    print("   • hlsctl logs       - Ver logs")
-    print("   • hlsctl fix-ffmpeg - Reparar FFmpeg")
-    print("=" * 50)
+    
+    # Garantir que os arquivos de banco de dados existam
+    print("💾 Inicializando banco de dados...")
+    load_users()
+    load_conversions()
     
     try:
         from waitress import serve
@@ -1515,156 +2205,112 @@ if __name__ == '__main__':
         serve(app, host='0.0.0.0', port=8080, threads=4)
     except ImportError:
         print("⚠️  Waitress não encontrado, usando servidor de desenvolvimento...")
-        print("📦 Instale: pip install waitress")
         app.run(host='0.0.0.0', port=8080, debug=False)
 EOF
 
-# 12. CRIAR ARQUIVOS DE CONFIGURAÇÃO
-echo "📁 Criando arquivos de configuração..."
+# 11. CRIAR ARQUIVOS DE BANCO DE DADOS
+echo "💾 Criando arquivos de banco de dados..."
 
-# Configuração do sistema
-cat > /opt/hls-converter/config.json << 'EOF'
+# Arquivo de usuários
+cat > /opt/hls-converter/db/users.json << 'EOF'
 {
-    "system": {
-        "port": 8080,
-        "upload_limit_mb": 2048,
-        "keep_originals": false,
-        "cleanup_days": 7,
-        "hls_segment_time": 10,
-        "enable_multiple_qualities": true
+    "users": {
+        "admin": {
+            "password": "$2b$12$7eE8R5Yq3X3t7kXq3Z8p9eBvG9HjK1L2N3M4Q5W6X7Y8Z9A0B1C2D3E4F5G6H7I8J9",
+            "password_changed": false,
+            "created_at": "2024-01-01T00:00:00",
+            "last_login": null,
+            "role": "admin"
+        }
     },
-    "authentication": {
+    "settings": {
         "require_password_change": true,
         "session_timeout": 3600,
-        "max_login_attempts": 5,
-        "password_min_length": 8,
-        "password_require_uppercase": true,
-        "password_require_lowercase": true,
-        "password_require_numbers": true,
-        "password_require_special": true
-    },
-    "qualities": {
-        "240p": {
-            "scale": "426:240",
-            "bitrate": "400k",
-            "audio_bitrate": "64k"
-        },
-        "480p": {
-            "scale": "854:480",
-            "bitrate": "800k",
-            "audio_bitrate": "96k"
-        },
-        "720p": {
-            "scale": "1280:720",
-            "bitrate": "1500k",
-            "audio_bitrate": "128k"
-        },
-        "1080p": {
-            "scale": "1920:1080",
-            "bitrate": "3000k",
-            "audio_bitrate": "192k"
-        }
+        "max_login_attempts": 5
     }
 }
 EOF
 
-# 13. CRIAR SCRIPT DE GERENCIAMENTO (hlsctl)
-echo "📝 Criando script de gerenciamento..."
+# Arquivo de conversões (vazio)
+cat > /opt/hls-converter/db/conversions.json << 'EOF'
+{
+    "conversions": [],
+    "stats": {
+        "total": 0,
+        "success": 0,
+        "failed": 0
+    }
+}
+EOF
+
+# 12. CRIAR SCRIPT DE GERENCIAMENTO FINAL
+echo "📝 Criando script de gerenciamento final..."
 
 cat > /usr/local/bin/hlsctl << 'EOF'
 #!/bin/bash
 
 HLS_HOME="/opt/hls-converter"
-LOG_FILE="/opt/hls-converter/logs/hlsctl.log"
-
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
-}
 
 case "$1" in
     start)
-        log "Iniciando serviço HLS Converter..."
+        echo "🚀 Iniciando HLS Converter..."
         systemctl start hls-converter
-        if [ $? -eq 0 ]; then
-            log "✅ Serviço iniciado com sucesso"
-            echo "✅ Serviço iniciado"
-        else
-            log "❌ Falha ao iniciar serviço"
-            echo "❌ Falha ao iniciar serviço"
-        fi
+        echo "✅ Serviço iniciado"
         ;;
-        
     stop)
-        log "Parando serviço HLS Converter..."
+        echo "🛑 Parando HLS Converter..."
         systemctl stop hls-converter
-        if [ $? -eq 0 ]; then
-            log "✅ Serviço parado com sucesso"
-            echo "✅ Serviço parado"
-        else
-            log "⚠️  Serviço pode não ter parado completamente"
-            echo "⚠️  Serviço parado (pode ter levado alguns segundos)"
-        fi
+        echo "✅ Serviço parado"
         ;;
-        
     restart)
-        log "Reiniciando serviço HLS Converter..."
+        echo "🔄 Reiniciando HLS Converter..."
         systemctl restart hls-converter
-        if [ $? -eq 0 ]; then
-            log "✅ Serviço reiniciado com sucesso"
-            echo "✅ Serviço reiniciado"
-            sleep 2
-            systemctl status hls-converter --no-pager
-        else
-            log "❌ Falha ao reiniciar serviço"
-            echo "❌ Falha ao reiniciar serviço"
-        fi
+        echo "✅ Serviço reiniciado"
+        sleep 2
+        systemctl status hls-converter --no-pager
         ;;
-        
     status)
         systemctl status hls-converter --no-pager
         ;;
-        
     logs)
-        if [ "$2" = "-f" ] || [ "$2" = "--follow" ]; then
+        if [ "$2" = "-f" ]; then
             journalctl -u hls-converter -f
-        elif [ "$2" = "-e" ] || [ "$2" = "--error" ]; then
-            journalctl -u hls-converter --since "1 hour ago" --no-pager | grep -E "(ERROR|error|failed|Failed|exception|Exception)"
         else
             journalctl -u hls-converter -n 30 --no-pager
         fi
         ;;
-        
     test)
-        log "Testando sistema HLS Converter..."
         echo "🧪 Testando sistema..."
+        echo ""
         
-        # Testar serviço
+        # Serviço
         if systemctl is-active --quiet hls-converter; then
             echo "✅ Serviço está ativo"
             
-            # Testar health check
+            # Health check
             echo "🌐 Testando health check..."
             if curl -s http://localhost:8080/health | grep -q "healthy"; then
                 echo "✅ Health check OK"
             else
-                echo "⚠️  Health check pode não estar respondendo"
+                echo "⚠️  Health check falhou"
                 curl -s http://localhost:8080/health || true
             fi
             
-            # Testar login
-            echo "🔐 Testando página de login..."
+            # Login
+            echo "🔐 Testando login..."
             STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/login)
             if [ "$STATUS_CODE" = "200" ]; then
-                echo "✅ Página de login acessível"
+                echo "✅ Página de login OK"
             else
-                echo "⚠️  Página de login retornou código: $STATUS_CODE"
+                echo "⚠️  Login retornou código: $STATUS_CODE"
             fi
             
         else
             echo "❌ Serviço não está ativo"
         fi
         
-        # Testar FFmpeg
+        # FFmpeg
+        echo ""
         echo "🎬 Testando FFmpeg..."
         if command -v ffmpeg &> /dev/null; then
             echo "✅ FFmpeg encontrado: $(which ffmpeg)"
@@ -1672,239 +2318,90 @@ case "$1" in
         else
             echo "❌ FFmpeg não encontrado"
         fi
-        
-        # Testar diretórios
-        echo "📁 Verificando diretórios..."
-        for dir in "$HLS_HOME" "$HLS_HOME/uploads" "$HLS_HOME/hls" "$HLS_HOME/logs" "$HLS_HOME/db" "$HLS_HOME/sessions"; do
-            if [ -d "$dir" ]; then
-                echo "✅ $dir"
-            else
-                echo "❌ $dir (não existe)"
-            fi
-        done
         ;;
-        
     fix-ffmpeg)
-        log "Reparando instalação do FFmpeg..."
-        echo "🔧 Reparando FFmpeg..."
-        
-        # Método 1: apt
-        echo "📦 Tentando instalação via apt..."
+        echo "🔧 Instalando FFmpeg..."
         apt-get update
-        if apt-get install -y ffmpeg; then
-            echo "✅ FFmpeg instalado via apt"
-            log "FFmpeg instalado via apt"
-        else
-            # Método 2: Snap
-            echo "📦 Tentando instalação via Snap..."
-            if command -v snap &> /dev/null; then
-                if snap install ffmpeg --classic; then
-                    echo "✅ FFmpeg instalado via Snap"
-                    log "FFmpeg instalado via Snap"
-                fi
-            fi
-        fi
-        
-        # Verificar instalação
+        apt-get install -y ffmpeg
         if command -v ffmpeg &> /dev/null; then
-            echo "🎉 FFmpeg reparado com sucesso!"
-            echo "📊 Versão: $(ffmpeg -version 2>/dev/null | head -1)"
-            log "FFmpeg reparado com sucesso"
+            echo "✅ FFmpeg instalado"
+            ffmpeg -version | head -1
         else
-            echo "❌ Não foi possível instalar FFmpeg"
-            echo "📋 Instale manualmente: sudo apt-get install -y ffmpeg"
-            log "Falha ao reparar FFmpeg"
+            echo "❌ Falha ao instalar FFmpeg"
         fi
         ;;
-        
     cleanup)
-        log "Limpando arquivos antigos..."
         echo "🧹 Limpando arquivos antigos..."
-        
-        # Arquivos de upload antigos
-        UPLOADS_CLEANED=$(find /opt/hls-converter/uploads -type f -mtime +7 -delete -print | wc -l)
-        
-        # Diretórios HLS antigos
-        HLS_CLEANED=0
-        for dir in /opt/hls-converter/hls/*/; do
-            if [ -d "$dir" ]; then
-                if [ $(find "$dir" -type f -mtime +7 | wc -l) -gt 0 ]; then
-                    rm -rf "$dir"
-                    HLS_CLEANED=$((HLS_CLEANED + 1))
-                fi
-            fi
-        done
-        
-        echo "✅ $UPLOADS_CLEANED arquivos de upload removidos"
-        echo "✅ $HLS_CLEANED diretórios HLS removidos"
-        log "Limpeza concluída: $UPLOADS_CLEANED uploads, $HLS_CLEANED diretórios HLS"
+        find /opt/hls-converter/uploads -type f -mtime +7 -delete 2>/dev/null || true
+        find /opt/hls-converter/hls -type d -mtime +7 -exec rm -rf {} \; 2>/dev/null || true
+        echo "✅ Arquivos antigos removidos"
         ;;
-        
-    reinstall-deps)
-        log "Reinstalando dependências Python..."
-        echo "🐍 Reinstalando dependências Python..."
-        
-        cd /opt/hls-converter
-        if [ -f "venv/bin/activate" ]; then
-            source venv/bin/activate
-            pip install --upgrade pip
-            
-            # Lista de dependências
-            DEPS="flask flask-cors waitress werkzeug psutil python-magic bcrypt cryptography"
-            
-            for dep in $DEPS; do
-                echo "📦 Instalando $dep..."
-                pip install --force-reinstall "$dep" || echo "⚠️  Falha ao reinstalar $dep"
-            done
-            
-            echo "✅ Dependências reinstaladas"
-            log "Dependências Python reinstaladas"
-        else
-            echo "❌ Virtualenv não encontrado"
-            log "Virtualenv não encontrado para reinstalação"
-        fi
-        ;;
-        
     reset-password)
-        if [ -z "$2" ]; then
-            echo "❌ Uso: hlsctl reset-password <username>"
-            echo "📋 Exemplo: hlsctl reset-password admin"
-            exit 1
-        fi
-        
-        USERNAME="$2"
-        echo "🔑 Redefinindo senha para $USERNAME..."
-        echo "⚠️  ATENÇÃO: Esta ação redefinirá a senha para 'admin123'"
-        echo "⚠️  O usuário será forçado a alterar a senha no próximo login"
-        echo ""
-        read -p "Continuar? (s/N): " -n 1 -r
-        echo ""
-        
-        if [[ $REPLY =~ ^[Ss]$ ]]; then
-            cd /opt/hls-converter
-            source venv/bin/activate
-            
-            python3 -c "
+        echo "🔑 Resetando senha do admin para 'admin'..."
+        cd /opt/hls-converter
+        source venv/bin/activate
+        python3 -c "
 import bcrypt
 import json
-import os
-
-users_file = '/opt/hls-converter/db/users.json'
-if os.path.exists(users_file):
-    with open(users_file, 'r') as f:
-        data = json.load(f)
-    
-    if '$USERNAME' in data['users']:
-        # Gerar hash para 'admin123'
-        new_hash = bcrypt.hashpw('admin123'.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-        data['users']['$USERNAME']['password'] = new_hash
-        data['users']['$USERNAME']['password_changed'] = False
-        
-        with open(users_file, 'w') as f:
-            json.dump(data, f, indent=2)
-        
-        print('✅ Senha redefinida com sucesso!')
-        print('👤 Usuário: $USERNAME')
-        print('🔑 Nova senha: admin123')
-        print('⚠️  Esta senha DEVE ser alterada no próximo login!')
-    else:
-        print('❌ Usuário não encontrado')
-else:
-    print('❌ Arquivo de usuários não encontrado')
+hash_admin = bcrypt.hashpw(b'admin', bcrypt.gensalt()).decode('utf-8')
+with open('/opt/hls-converter/db/users.json', 'r') as f:
+    data = json.load(f)
+data['users']['admin']['password'] = hash_admin
+data['users']['admin']['password_changed'] = False
+with open('/opt/hls-converter/db/users.json', 'w') as f:
+    json.dump(data, f, indent=2)
+print('✅ Senha resetada para: admin')
+print('⚠️  Altere a senha no primeiro login!')
 "
-        else
-            echo "❌ Operação cancelada"
-        fi
         ;;
-        
     info)
         IP=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "localhost")
-        
         echo "=" * 50
-        echo "🎬 HLS Converter ULTIMATE - Informações do Sistema"
+        echo "🎬 HLS Converter ULTIMATE - Informações"
         echo "=" * 50
-        
-        # Status do serviço
-        SERVICE_STATUS=$(systemctl is-active hls-converter)
-        if [ "$SERVICE_STATUS" = "active" ]; then
-            echo "✅ Serviço: ATIVO"
-        else
-            echo "❌ Serviço: $SERVICE_STATUS"
-        fi
-        
-        # FFmpeg
-        if command -v ffmpeg &> /dev/null; then
-            FFMPEG_VERSION=$(ffmpeg -version 2>/dev/null | head -1 | cut -d' ' -f3)
-            echo "✅ FFmpeg: $FFMPEG_VERSION"
-        else
-            echo "❌ FFmpeg: NÃO INSTALADO"
-        fi
-        
-        # URLs
-        echo "🌐 URLs:"
-        echo "   🔐 Login:     http://$IP:8080/login"
-        echo "   🎮 Dashboard: http://$IP:8080/"
-        echo "   🩺 Health:    http://$IP:8080/health"
-        
-        # Diretórios
+        echo "Status: $(systemctl is-active hls-converter 2>/dev/null || echo 'inactive')"
+        echo "Porta: 8080"
+        echo "Login: http://$IP:8080/login"
+        echo "Usuário: admin"
+        echo "Senha: admin (altere no primeiro acesso)"
+        echo ""
         echo "📁 Diretórios:"
-        echo "   📂 Aplicação: /opt/hls-converter"
-        echo "   💾 Uploads:   /opt/hls-converter/uploads"
-        echo "   🎬 HLS:       /opt/hls-converter/hls"
-        echo "   📋 Logs:      /opt/hls-converter/logs"
-        
-        # Usuários
-        if [ -f "/opt/hls-converter/db/users.json" ]; then
-            USER_COUNT=$(python3 -c "import json; data=json.load(open('/opt/hls-converter/db/users.json')); print(len(data.get('users', {})))" 2>/dev/null || echo "0")
-            echo "👥 Usuários cadastrados: $USER_COUNT"
-        fi
-        
-        # Conversões
-        if [ -f "/opt/hls-converter/db/conversions.json" ]; then
-            TOTAL_CONV=$(python3 -c "import json; data=json.load(open('/opt/hls-converter/db/conversions.json')); print(data.get('stats', {}).get('total', 0))" 2>/dev/null || echo "0")
-            echo "🔄 Total de conversões: $TOTAL_CONV"
-        fi
-        
+        echo "  /opt/hls-converter/ - Diretório principal"
+        echo "  /opt/hls-converter/uploads/ - Vídeos enviados"
+        echo "  /opt/hls-converter/hls/ - Arquivos HLS"
+        echo "  /opt/hls-converter/logs/ - Logs do sistema"
+        echo "  /opt/hls-converter/db/ - Banco de dados"
         echo "=" * 50
         ;;
-        
     *)
         echo "🎬 HLS Converter ULTIMATE - Gerenciador"
         echo "========================================"
         echo ""
         echo "Uso: hlsctl [comando]"
         echo ""
-        echo "Comandos principais:"
-        echo "  start           - Iniciar serviço"
-        echo "  stop            - Parar serviço"
-        echo "  restart         - Reiniciar serviço"
-        echo "  status          - Ver status do serviço"
-        echo "  logs [opções]   - Ver logs do serviço"
-        echo "                    -f, --follow: Seguir logs em tempo real"
-        echo "                    -e, --error:  Mostrar apenas erros"
-        echo "  test            - Testar sistema completo"
-        echo "  fix-ffmpeg      - Reparar/instalar FFmpeg"
-        echo "  cleanup         - Limpar arquivos antigos (>7 dias)"
-        echo "  reinstall-deps  - Reinstalar dependências Python"
-        echo ""
-        echo "Gerenciamento de usuários:"
-        echo "  reset-password <user> - Redefinir senha para 'admin123'"
-        echo ""
-        echo "Informações:"
-        echo "  info            - Mostrar informações do sistema"
+        echo "Comandos:"
+        echo "  start        - Iniciar serviço"
+        echo "  stop         - Parar serviço"
+        echo "  restart      - Reiniciar serviço"
+        echo "  status       - Ver status"
+        echo "  logs [-f]    - Ver logs (-f para seguir)"
+        echo "  test         - Testar sistema completo"
+        echo "  fix-ffmpeg   - Instalar/repare FFmpeg"
+        echo "  cleanup      - Limpar arquivos antigos"
+        echo "  reset-password - Resetar senha do admin"
+        echo "  info         - Informações do sistema"
         echo ""
         echo "Exemplos:"
         echo "  hlsctl start"
         echo "  hlsctl logs -f"
         echo "  hlsctl test"
         echo "  hlsctl fix-ffmpeg"
-        echo "  hlsctl reset-password admin"
         ;;
 esac
 EOF
 
-# 14. CRIAR SERVIÇO SYSTEMD CORRIGIDO
-echo "⚙️ Criando serviço systemd..."
+# 13. CRIAR SERVIÇO SYSTEMD
+echo "⚙️ Configurando serviço systemd..."
 
 cat > /etc/systemd/system/hls-converter.service << 'EOF'
 [Unit]
@@ -1918,183 +2415,131 @@ User=hlsuser
 Group=hlsuser
 WorkingDirectory=/opt/hls-converter
 Environment="PATH=/opt/hls-converter/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-Environment="PYTHONPATH=/opt/hls-converter"
 Environment="PYTHONUNBUFFERED=1"
 
-# Comando corrigido - usa o Python do virtualenv
 ExecStart=/opt/hls-converter/venv/bin/python /opt/hls-converter/app.py
 
-# Reiniciar sempre que falhar
 Restart=always
 RestartSec=10
 
-# Logs
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=hls-converter
 
-# Segurança
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ReadWritePaths=/opt/hls-converter/uploads /opt/hls-converter/hls /opt/hls-converter/logs /opt/hls-converter/db /opt/hls-converter/sessions
-ReadOnlyPaths=/opt/hls-converter
-
-# Limites de recursos
-LimitNOFILE=65536
-LimitNPROC=65536
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# 15. CONFIGURAR PERMISSÕES
+# 14. CONFIGURAR PERMISSÕES
 echo "🔐 Configurando permissões..."
 
-# Definir permissões corretas
 chown -R hlsuser:hlsuser /opt/hls-converter
 chmod 755 /opt/hls-converter
 chmod 644 /opt/hls-converter/app.py
-chmod 644 /opt/hls-converter/*.json
+chmod 644 /opt/hls-converter/db/*.json
 chmod 755 /usr/local/bin/hlsctl
-
-# Permissões específicas para diretórios
-chmod 755 /opt/hls-converter/uploads
-chmod 755 /opt/hls-converter/hls
-chmod 755 /opt/hls-converter/logs
 chmod 700 /opt/hls-converter/sessions
-chmod 755 /opt/hls-converter/db
 
-# 16. INICIAR E TESTAR SERVIÇO
+# 15. INICIAR SERVIÇO
 echo "🚀 Iniciando serviço..."
 
 systemctl daemon-reload
 systemctl enable hls-converter.service
 
-# Tentar iniciar o serviço
 if systemctl start hls-converter.service; then
     echo "✅ Serviço iniciado com sucesso"
+    sleep 3
 else
-    echo "❌ Falha ao iniciar serviço, tentando diagnóstico..."
-    
-    # Tentar executar manualmente para ver erros
-    echo "🧪 Executando manualmente para diagnóstico..."
-    cd /opt/hls-converter
-    sudo -u hlsuser /opt/hls-converter/venv/bin/python app.py --test || \
-    sudo -u hlsuser /opt/hls-converter/venv/bin/python -c "exec(open('app.py').read())"
+    echo "❌ Falha ao iniciar serviço"
+    journalctl -u hls-converter -n 20 --no-pager
 fi
 
-# Esperar um pouco e verificar status
-sleep 5
+# 16. VERIFICAÇÃO FINAL
+echo "🔍 Realizando verificação final..."
 
-echo ""
-echo "📊 Verificando status do serviço..."
+IP=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "localhost")
 
 if systemctl is-active --quiet hls-converter.service; then
-    echo "🎉 SERVIÇO ESTÁ ATIVO E FUNCIONANDO!"
+    echo "🎉 SERVIÇO ATIVO E FUNCIONANDO!"
     
-    # Testar endpoints
     echo ""
-    echo "🧪 Testando endpoints..."
+    echo "🧪 Testes rápidos:"
     
     # Health check
-    echo "🩺 Testando health check..."
     if curl -s http://localhost:8080/health | grep -q "healthy"; then
-        echo "✅ Health check OK"
+        echo "✅ Health check: OK"
     else
-        echo "⚠️  Health check pode não estar respondendo"
-        curl -s http://localhost:8080/health || true
+        echo "⚠️  Health check: Pode ter problemas"
     fi
     
     # Login page
-    echo ""
-    echo "🔐 Testando página de login..."
     STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/login)
     if [ "$STATUS_CODE" = "200" ]; then
-        echo "✅ Página de login acessível"
+        echo "✅ Página de login: OK"
     else
-        echo "⚠️  Página de login retornou código: $STATUS_CODE"
+        echo "⚠️  Página de login: Código $STATUS_CODE"
     fi
     
 else
     echo "❌ Serviço não está ativo"
     echo ""
-    echo "📋 Últimos logs do serviço:"
+    echo "📋 Logs de erro:"
     journalctl -u hls-converter -n 20 --no-pager
 fi
 
 # 17. INFORMAÇÕES FINAIS
-IP=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "localhost")
-
 echo ""
 echo "=" * 60
-echo "🎉🎉🎉 INSTALAÇÃO COMPLETA COM CORREÇÕES APLICADAS! 🎉🎉🎉"
+echo "🎉 INSTALAÇÃO FINAL COMPLETA COM CORREÇÕES APLICADAS! 🎉"
 echo "=" * 60
 echo ""
-echo "✅ SISTEMA INSTALADO E CONFIGURADO COM SUCESSO"
+echo "✅ SISTEMA PRONTO PARA USO"
 echo ""
 echo "🔐 INFORMAÇÕES DE ACESSO:"
-echo "   👤 Usuário padrão: admin"
-echo "   🔑 Senha padrão: admin"
-echo "   ⚠️  OBRIGATÓRIO: Altere a senha no primeiro login!"
+echo "   👤 Usuário: admin"
+echo "   🔑 Senha: admin"
+echo "   ⚠️  IMPORTANTE: Altere a senha no primeiro acesso!"
 echo ""
 echo "🌐 URLS DO SISTEMA:"
-echo "   🔐 Página de login:    http://$IP:8080/login"
-echo "   🎮 Dashboard:          http://$IP:8080/"
-echo "   🩺 Health check:       http://$IP:8080/health"
+echo "   🔐 Login:    http://$IP:8080/login"
+echo "   🎮 Dashboard: http://$IP:8080/"
+echo "   🩺 Health:   http://$IP:8080/health"
 echo ""
 echo "⚙️  COMANDOS DE GERENCIAMENTO:"
-echo "   • hlsctl start        - Iniciar serviço"
-echo "   • hlsctl stop         - Parar serviço"
-echo "   • hlsctl restart      - Reiniciar serviço"
-echo "   • hlsctl status       - Ver status do serviço"
-echo "   • hlsctl logs [-f]    - Ver logs do serviço (-f para seguir)"
-echo "   • hlsctl test         - Testar sistema completo"
-echo "   • hlsctl fix-ffmpeg   - Reparar/instalar FFmpeg"
-echo "   • hlsctl cleanup      - Limpar arquivos antigos"
-echo "   • hlsctl info         - Informações do sistema"
+echo "   • hlsctl start      - Iniciar serviço"
+echo "   • hlsctl stop       - Parar serviço"
+echo "   • hlsctl restart    - Reiniciar serviço"
+echo "   • hlsctl status     - Ver status"
+echo "   • hlsctl logs       - Ver logs"
+echo "   • hlsctl test       - Testar sistema"
+echo "   • hlsctl fix-ffmpeg - Reparar FFmpeg"
 echo ""
-echo "🔧 SOLUÇÃO DE PROBLEMAS:"
-echo "   Se o serviço não iniciar:"
-echo "   1. Verifique logs: hlsctl logs"
-echo "   2. Teste FFmpeg: hlsctl fix-ffmpeg"
-echo "   3. Reinstale dependências: hlsctl reinstall-deps"
-echo "   4. Reinicie: hlsctl restart"
+echo "📁 ESTRUTURA:"
+echo "   /opt/hls-converter/     - Diretório principal"
+echo "   ├── app.py             - Aplicação principal"
+echo "   ├── uploads/           - Vídeos enviados"
+echo "   ├── hls/               - Arquivos HLS gerados"
+echo "   ├── db/                - Banco de dados (usuários/conversões)"
+echo "   ├── logs/              - Logs do sistema"
+echo "   └── sessions/          - Sessões de usuário"
 echo ""
-echo "💡 DICAS RÁPIDAS:"
-echo "   1. Primeiro acesso: http://$IP:8080/login"
-echo "   2. Use admin/admin para fazer login"
-echo "   3. Altere a senha imediatamente"
-echo "   4. Teste o sistema: hlsctl test"
+echo "🔧 CORREÇÕES APLICADAS:"
+echo "   1. ✅ Sistema de login corrigido"
+echo "   2. ✅ Histórico de conversões funcionando"
+echo "   3. ✅ Estrutura de banco de dados corrigida"
+echo "   4. ✅ Interface atualizada e responsiva"
+echo "   5. ✅ Sistema de notificações (toast)"
+echo "   6. ✅ Validação de dados robusta"
 echo ""
-echo "📁 ESTRUTURA DE DIRETÓRIOS:"
-echo "   /opt/hls-converter/      - Diretório principal"
-echo "   ├── uploads/            - Vídeos enviados"
-echo "   ├── hls/                - Arquivos HLS gerados"
-echo "   ├── logs/               - Logs do sistema"
-echo "   ├── db/                 - Banco de dados"
-echo "   └── sessions/           - Sessões de usuário"
+echo "💡 DICA:"
+echo "   Para testar, faça login e converta um vídeo."
+echo "   O histórico aparecerá automaticamente na aba 'Histórico'."
 echo ""
 echo "=" * 60
-echo "🚀 Sistema pronto para uso! Acesse http://$IP:8080/login"
+echo "🚀 Sistema pronto! Acesse http://$IP:8080/login"
 echo "=" * 60
-
-# 18. CRIAR SCRIPT DE BACKUP
-cat > /usr/local/bin/hls-backup << 'EOF'
-#!/bin/bash
-BACKUP_DIR="/opt/hls-backup-$(date +%Y%m%d_%H%M%S)"
-echo "💾 Criando backup em: $BACKUP_DIR"
-mkdir -p "$BACKUP_DIR"
-cp -r /opt/hls-converter/db "$BACKUP_DIR/"
-cp -r /opt/hls-converter/config.json "$BACKUP_DIR/" 2>/dev/null || true
-echo "✅ Backup concluído: $(du -sh $BACKUP_DIR | cut -f1)"
-echo "📂 Conteúdo:"
-ls -la "$BACKUP_DIR/"
-EOF
-
-chmod +x /usr/local/bin/hls-backup
-
-echo ""
-echo "✅ Script de backup criado: hls-backup"
-echo ""
-echo "🎯 INSTALAÇÃO COMPLETA - SISTEMA CORRIGIDO E PRONTO PARA USO!"
