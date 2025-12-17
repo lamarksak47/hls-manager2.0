@@ -13,82 +13,168 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# 2. Atualizar sistema
-echo "📦 Atualizando sistema..."
-apt-get update
-apt-get upgrade -y
+# Função para verificar e liberar locks do apt
+check_apt_locks() {
+    echo "🔍 Verificando locks do apt..."
+    
+    # Verificar se há processos apt em execução
+    if pgrep -x "apt-get" > /dev/null || pgrep -x "apt" > /dev/null || pgrep -x "dpkg" > /dev/null; then
+        echo "⚠️  Processos apt/dpkg em execução encontrados:"
+        ps aux | grep -E "(apt|dpkg)" | grep -v grep
+        
+        echo ""
+        echo "🕐 Aguardando processos terminarem (máximo 60 segundos)..."
+        
+        # Aguardar até 60 segundos pelos processos terminarem
+        for i in {1..60}; do
+            if ! pgrep -x "apt-get" > /dev/null && ! pgrep -x "apt" > /dev/null && ! pgrep -x "dpkg" > /dev/null; then
+                echo "✅ Processos terminados após $i segundos"
+                break
+            fi
+            sleep 1
+            echo -n "."
+        done
+        
+        # Se ainda houver processos após 60 segundos, perguntar ao usuário
+        if pgrep -x "apt-get" > /dev/null || pgrep -x "apt" > /dev/null || pgrep -x "dpkg" > /dev/null; then
+            echo ""
+            echo "⚠️  Ainda há processos apt/dpkg em execução."
+            read -p "Deseja forçar a continuação? (s/N): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Ss]$ ]]; then
+                echo "❌ Instalação cancelada pelo usuário"
+                exit 1
+            fi
+        fi
+    fi
+    
+    # Verificar arquivos de lock
+    if [ -f /var/lib/apt/lists/lock ] || [ -f /var/lib/dpkg/lock ]; then
+        echo "🔓 Removendo arquivos de lock antigos..."
+        rm -f /var/lib/apt/lists/lock
+        rm -f /var/lib/dpkg/lock
+        rm -f /var/cache/apt/archives/lock
+        echo "✅ Locks removidos"
+    fi
+}
 
-# 3. Parar serviços existentes
+# 2. Verificar e liberar locks antes de atualizar
+check_apt_locks
+
+# 3. Atualizar sistema
+echo "📦 Atualizando sistema..."
+apt-get update || {
+    echo "⚠️  Erro ao atualizar, tentando corrigir..."
+    dpkg --configure -a
+    apt-get install -f -y
+    apt-get update
+}
+
+apt-get upgrade -y || {
+    echo "⚠️  Erro ao fazer upgrade, continuando com instalação..."
+}
+
+# 4. Parar serviços existentes
 echo "🛑 Parando serviços existentes..."
 systemctl stop hls-simple hls-dashboard hls-manager hls-final hls-converter 2>/dev/null || true
 pkill -9 python 2>/dev/null || true
 sleep 2
 
-# 4. Limpar instalações anteriores
+# 5. Limpar instalações anteriores
 echo "🧹 Limpando instalações anteriores..."
 rm -rf /opt/hls-converter 2>/dev/null || true
 rm -rf /etc/systemd/system/hls-*.service 2>/dev/null || true
 rm -f /usr/local/bin/hlsctl 2>/dev/null || true
 systemctl daemon-reload
 
-# 5. INSTALAR FFMPEG
+# 6. INSTALAR FFMPEG
 echo "🎬 INSTALANDO FFMPEG..."
 if ! command -v ffmpeg &> /dev/null; then
-    apt-get install -y ffmpeg
+    apt-get install -y ffmpeg || {
+        echo "⚠️  Erro ao instalar ffmpeg, tentando alternativas..."
+        add-apt-repository -y ppa:jonathonf/ffmpeg-4 2>/dev/null || true
+        apt-get update
+        apt-get install -y ffmpeg || {
+            echo "❌ Não foi possível instalar ffmpeg automaticamente"
+            echo "📋 Instale manualmente: sudo apt-get install -y ffmpeg"
+        }
+    }
     echo "✅ FFmpeg instalado"
 else
     echo "✅ FFmpeg já está instalado"
 fi
 
-# 6. Instalar outras dependências
+# 7. Instalar outras dependências
 echo "🔧 Instalando outras dependências..."
-apt-get install -y python3 python3-pip python3-venv curl wget net-tools
+apt-get install -y python3 python3-pip python3-venv curl wget net-tools || {
+    echo "⚠️  Erro ao instalar dependências, tentando continuar..."
+}
 
-# 7. Configurar firewall
+# 8. Configurar firewall
 echo "🔥 Configurando firewall..."
 if command -v ufw &> /dev/null; then
-    ufw --force enable
-    ufw allow 22/tcp
-    ufw allow 8080/tcp
-    ufw --force reload
+    ufw --force enable 2>/dev/null || true
+    ufw allow 22/tcp 2>/dev/null || true
+    ufw allow 8080/tcp 2>/dev/null || true
+    ufw --force reload 2>/dev/null || true
     echo "✅ Firewall configurado (porta 8080 liberada)"
 elif command -v firewall-cmd &> /dev/null; then
-    firewall-cmd --permanent --add-port=8080/tcp
-    firewall-cmd --reload
+    firewall-cmd --permanent --add-port=8080/tcp 2>/dev/null || true
+    firewall-cmd --reload 2>/dev/null || true
     echo "✅ Firewall configurado (FirewallD)"
 else
     echo "⚠️  Nenhum firewall detectado, configurando iptables..."
-    iptables -A INPUT -p tcp --dport 8080 -j ACCEPT
+    iptables -A INPUT -p tcp --dport 8080 -j ACCEPT 2>/dev/null || true
     iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
     echo "✅ Porta 8080 liberada no iptables"
 fi
 
-# 8. Criar estrutura de diretórios
+# 9. Criar estrutura de diretórios
 echo "🏗️  Criando estrutura de diretórios..."
 mkdir -p /opt/hls-converter/{uploads,hls,logs,db,templates,static,sessions}
 mkdir -p /opt/hls-converter/hls/{240p,360p,480p,720p,1080p,original}
 cd /opt/hls-converter
 
-# 9. Criar usuário dedicado
+# 10. Criar usuário dedicado
 echo "👤 Criando usuário dedicado..."
 if id "hlsuser" &>/dev/null; then
     echo "✅ Usuário hlsuser já existe"
 else
-    useradd -r -s /bin/false hlsuser
+    useradd -r -s /bin/false hlsuser 2>/dev/null || {
+        echo "⚠️  Erro ao criar usuário, tentando com opções diferentes..."
+        useradd -r -M -s /bin/false hlsuser || true
+    }
     echo "✅ Usuário hlsuser criado"
 fi
 
-# 10. Configurar ambiente Python
+# 11. Configurar ambiente Python
 echo "🐍 Configurando ambiente Python..."
-python3 -m venv venv
+python3 -m venv venv || {
+    echo "⚠️  Erro ao criar venv, instalando python3-venv..."
+    apt-get install -y python3-venv
+    python3 -m venv venv
+}
+
 source venv/bin/activate
 
 # Instalar dependências Python
 echo "📦 Instalando dependências Python..."
-pip install --upgrade pip
-pip install flask flask-cors waitress werkzeug psutil bcrypt cryptography
+pip install --upgrade pip || {
+    echo "⚠️  Erro ao atualizar pip, continuando..."
+}
 
-# 11. CRIAR APLICAÇÃO FLASK FINAL CORRIGIDA COM MULTI-UPLOAD
+pip install flask flask-cors waitress werkzeug psutil bcrypt cryptography || {
+    echo "⚠️  Erro ao instalar dependências Python, tentando uma por uma..."
+    pip install flask || true
+    pip install flask-cors || true
+    pip install waitress || true
+    pip install werkzeug || true
+    pip install psutil || true
+    pip install bcrypt || true
+    pip install cryptography || true
+}
+
+# 12. CRIAR APLICAÇÃO FLASK FINAL CORRIGIDA COM MULTI-UPLOAD
 echo "💻 Criando aplicação Flask final com multi-upload..."
 
 cat > app.py << 'EOF'
@@ -266,7 +352,7 @@ def log_activity(message):
     """Registra atividade no log"""
     try:
         log_file = os.path.join(LOG_DIR, "activity.log")
-        timestamp = datetime.now().strftime("%Y-%m-d %H:%M:%S")
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with open(log_file, 'a') as f:
             f.write(f"[{timestamp}] {message}\n")
     except:
@@ -2757,7 +2843,7 @@ if __name__ == '__main__':
         app.run(host='0.0.0.0', port=8080, debug=False)
 EOF
 
-# 12. CRIAR ARQUIVOS DE BANCO DE DADOS
+# 13. CRIAR ARQUIVOS DE BANCO DE DADOS
 echo "💾 Criando arquivos de banco de dados..."
 
 # Arquivo de usuários
@@ -2792,7 +2878,7 @@ cat > /opt/hls-converter/db/conversions.json << 'EOF'
 }
 EOF
 
-# 13. CRIAR SCRIPT DE GERENCIAMENTO FINAL
+# 14. CRIAR SCRIPT DE GERENCIAMENTO FINAL
 echo "📝 Criando script de gerenciamento final..."
 
 cat > /usr/local/bin/hlsctl << 'EOF'
@@ -3004,7 +3090,7 @@ print('⚠️  Altere a senha no primeiro login!')
 esac
 EOF
 
-# 14. CRIAR SERVIÇO SYSTEMD
+# 15. CRIAR SERVIÇO SYSTEMD
 echo "⚙️ Configurando serviço systemd..."
 
 cat > /etc/systemd/system/hls-converter.service << 'EOF'
@@ -3039,7 +3125,7 @@ ReadWritePaths=/opt/hls-converter/uploads /opt/hls-converter/hls /opt/hls-conver
 WantedBy=multi-user.target
 EOF
 
-# 15. CONFIGURAR PERMISSÕES
+# 16. CONFIGURAR PERMISSÕES
 echo "🔐 Configurando permissões..."
 
 chown -R hlsuser:hlsuser /opt/hls-converter
@@ -3049,7 +3135,7 @@ chmod 644 /opt/hls-converter/db/*.json
 chmod 755 /usr/local/bin/hlsctl
 chmod 700 /opt/hls-converter/sessions
 
-# 16. INICIAR SERVIÇO
+# 17. INICIAR SERVIÇO
 echo "🚀 Iniciando serviço..."
 
 systemctl daemon-reload
@@ -3063,7 +3149,7 @@ else
     journalctl -u hls-converter -n 20 --no-pager
 fi
 
-# 17. VERIFICAÇÃO FINAL
+# 18. VERIFICAÇÃO FINAL
 echo "🔍 Realizando verificação final..."
 
 IP=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "localhost")
@@ -3123,7 +3209,7 @@ else
     journalctl -u hls-converter -n 20 --no-pager
 fi
 
-# 18. INFORMAÇÕES FINAIS
+# 19. INFORMAÇÕES FINAIS
 echo ""
 echo "=" * 70
 echo "🎉 INSTALAÇÃO COMPLETA COM MULTI-UPLOAD E FIREWALL! 🎉"
