@@ -15,8 +15,8 @@ fi
 
 # 2. Atualizar sistema
 echo "📦 Atualizando sistema..."
-apt-get update
-apt-get upgrade -y
+sudo apt-get update
+sudo apt-get upgrade -y
 
 # 3. Instalar dependências do sistema
 echo "🔧 Instalando dependências..."
