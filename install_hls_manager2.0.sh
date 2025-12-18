@@ -15,8 +15,8 @@ fi
 
 # 2. Atualizar sistema
 echo "📦 Atualizando sistema..."
-sudo apt-get update
-sudo apt-get upgrade -y
+apt-get update
+apt-get upgrade -y
 
 # 3. Instalar dependências do sistema
 echo "🔧 Instalando dependências..."
@@ -954,300 +954,7 @@ def process_videos_from_list(videos_list, qualities, playlist_id, conversion_nam
             "videos_info": videos_info
         }
 
-# =============== PÁGINAS HTML COM NOVA INTERFACE ===============
-
-# ... (HTML será muito grande, vou mostrar apenas as partes modificadas)
-# O HTML completo será gerado no final com todas as modificações
-
-# =============== ROTAS PRINCIPAIS ===============
-
-@app.route('/')
-def index():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    
-    if password_change_required(session['user_id']):
-        return redirect(url_for('change_password'))
-    
-    # Gerar HTML dinâmico com as novas funcionalidades
-    return render_template_string(get_dashboard_html())
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'GET':
-        if 'user_id' in session:
-            return redirect(url_for('index'))
-        return render_template_string(LOGIN_HTML)
-    
-    username = request.form.get('username', '').strip()
-    password = request.form.get('password', '').strip()
-    
-    if not username or not password:
-        flash('Por favor, preencha todos os campos', 'error')
-        return render_template_string(LOGIN_HTML)
-    
-    if check_password(username, password):
-        users = load_users()
-        if username in users.get('users', {}):
-            users['users'][username]['last_login'] = datetime.now().isoformat()
-            save_users(users)
-        
-        session['user_id'] = username
-        session['login_time'] = datetime.now().isoformat()
-        
-        if password_change_required(username):
-            return redirect(url_for('change_password'))
-        
-        log_activity(f"Usuário {username} fez login")
-        return redirect(url_for('index'))
-    else:
-        flash('Usuário ou senha incorretos', 'error')
-        return render_template_string(LOGIN_HTML)
-
-# ... (outras rotas: change-password, logout, etc.)
-
-# =============== NOVAS ROTAS PARA ARQUIVOS INTERNOS ===============
-
-@app.route('/api/videos-internos')
-def api_videos_internos():
-    """Lista todos os vídeos internos"""
-    if 'user_id' not in session:
-        return jsonify({"success": False, "error": "Não autenticado"}), 401
-    
-    videos = list_videos_internos()
-    return jsonify({
-        "success": True,
-        "videos": videos,
-        "count": len(videos)
-    })
-
-@app.route('/api/videos-internos/upload', methods=['POST'])
-def api_videos_internos_upload():
-    """Faz upload de vídeos para o diretório interno"""
-    if 'user_id' not in session:
-        return jsonify({"success": False, "error": "Não autenticado"}), 401
-    
-    if 'files[]' not in request.files:
-        return jsonify({"success": False, "error": "Nenhum arquivo enviado"})
-    
-    files = request.files.getlist('files[]')
-    results = []
-    
-    for file in files:
-        if file.filename == '':
-            continue
-        
-        result = upload_video_interno(file)
-        results.append(result)
-        
-        if result.get('success'):
-            log_activity(f"Usuário {session['user_id']} fez upload interno: {result['filename']}")
-    
-    return jsonify({
-        "success": True,
-        "results": results,
-        "uploaded": len([r for r in results if r.get('success')])
-    })
-
-@app.route('/api/videos-internos/delete/<filename>', methods=['DELETE'])
-def api_videos_internos_delete(filename):
-    """Exclui um vídeo interno"""
-    if 'user_id' not in session:
-        return jsonify({"success": False, "error": "Não autenticado"}), 401
-    
-    result = delete_video_interno(filename)
-    
-    if result.get('success'):
-        log_activity(f"Usuário {session['user_id']} excluiu vídeo interno: {filename}")
-    
-    return jsonify(result)
-
-# =============== ROTA DE CONVERSÃO UNIFICADA ===============
-
-@app.route('/convert', methods=['POST'])
-def convert_videos():
-    """Converter vídeos (externos ou internos) - VERSÃO UNIFICADA"""
-    if 'user_id' not in session:
-        return jsonify({"success": False, "error": "Não autenticado"}), 401
-    
-    print(f"[DEBUG] Iniciando conversão para usuário: {session['user_id']}")
-    
-    try:
-        ffmpeg_path = find_ffmpeg()
-        if not ffmpeg_path:
-            print("[DEBUG] FFmpeg não encontrado")
-            return jsonify({
-                "success": False,
-                "error": "FFmpeg não encontrado. Execute: sudo apt-get install ffmpeg"
-            })
-        
-        conversion_type = request.form.get('conversion_type', 'upload')  # 'upload' ou 'internal'
-        conversion_name = request.form.get('conversion_name', '').strip()
-        qualities_json = request.form.get('qualities', '["720p"]')
-        
-        try:
-            qualities = json.loads(qualities_json)
-        except:
-            qualities = ["720p"]
-        
-        if not conversion_name:
-            conversion_name = f"Conversão {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-        
-        conversion_name = sanitize_filename(conversion_name)
-        print(f"[DEBUG] Tipo: {conversion_type}, Nome: {conversion_name}, Qualidades: {qualities}")
-        
-        videos_list = []
-        
-        if conversion_type == 'upload':
-            # Processar arquivos enviados
-            if 'files[]' not in request.files:
-                return jsonify({"success": False, "error": "Nenhum arquivo enviado"})
-            
-            files = request.files.getlist('files[]')
-            if not files or files[0].filename == '':
-                return jsonify({"success": False, "error": "Nenhum arquivo selecionado"})
-            
-            for file in files:
-                # Salvar temporariamente no diretório de uploads
-                temp_filename = f"{uuid.uuid4().hex}_{file.filename}"
-                temp_path = os.path.join(UPLOAD_DIR, temp_filename)
-                file.save(temp_path)
-                
-                videos_list.append({
-                    "path": temp_path,
-                    "filename": file.filename,
-                    "type": "upload"
-                })
-            
-        elif conversion_type == 'internal':
-            # Processar arquivos internos selecionados
-            selected_files_json = request.form.get('selected_internal_files', '[]')
-            try:
-                selected_files = json.loads(selected_files_json)
-            except:
-                return jsonify({"success": False, "error": "Erro ao processar arquivos selecionados"})
-            
-            for filename in selected_files:
-                filepath = os.path.join(VIDEOS_INTERNOS_DIR, filename)
-                if os.path.exists(filepath):
-                    videos_list.append({
-                        "path": filepath,
-                        "filename": filename,
-                        "type": "internal"
-                    })
-                else:
-                    return jsonify({"success": False, "error": f"Arquivo não encontrado: {filename}"})
-        
-        else:
-            return jsonify({"success": False, "error": "Tipo de conversão inválido"})
-        
-        if not videos_list:
-            return jsonify({"success": False, "error": "Nenhum vídeo selecionado para conversão"})
-        
-        playlist_id = str(uuid.uuid4())[:8]
-        
-        # Inicializar progresso
-        update_progress(playlist_id, 0, len(videos_list), "Iniciando conversão...", "")
-        
-        print(f"Iniciando conversão: {len(videos_list)} arquivos, nome: {conversion_name}")
-        
-        # Processar em thread
-        def conversion_task():
-            return process_videos_from_list(videos_list, qualities, playlist_id, conversion_name)
-        
-        future = executor.submit(conversion_task)
-        result = future.result(timeout=7200)  # Timeout de 2 horas
-        
-        print(f"Resultado da conversão: {result.get('success', False)}")
-        
-        if result.get("success", False):
-            conversions = load_conversions()
-            conversion_data = {
-                "playlist_id": playlist_id,
-                "video_id": playlist_id,
-                "conversion_name": conversion_name,
-                "filename": f"{len(videos_list)} arquivos",
-                "qualities": qualities,
-                "timestamp": datetime.now().isoformat(),
-                "status": "success",
-                "type": conversion_type,
-                "videos_count": len(videos_list),
-                "videos_converted": result.get("videos_converted", 0),
-                "m3u8_url": f"/hls/{playlist_id}/master.m3u8",
-                "player_url": f"/player/{playlist_id}",
-                "details": result.get("videos_info", [])
-            }
-            
-            if not isinstance(conversions.get('conversions'), list):
-                conversions['conversions'] = []
-            
-            conversions['conversions'].insert(0, conversion_data)
-            conversions['stats']['total'] = conversions['stats'].get('total', 0) + 1
-            conversions['stats']['success'] = conversions['stats'].get('success', 0) + 1
-            
-            save_conversions(conversions)
-            
-            log_activity(f"Conversão '{conversion_name}' realizada: {len(videos_list)} arquivos -> {playlist_id}")
-            
-            return jsonify({
-                "success": True,
-                "playlist_id": playlist_id,
-                "conversion_name": conversion_name,
-                "videos_count": len(videos_list),
-                "videos_converted": result.get("videos_converted", 0),
-                "qualities": result.get("qualities", qualities),
-                "m3u8_url": f"/hls/{playlist_id}/master.m3u8",
-                "player_url": f"/player/{playlist_id}",
-                "quality_links": result.get("quality_links", {}),
-                "video_links": result.get("video_links", []),
-                "errors": result.get("errors", []),
-                "message": f"Conversão '{conversion_name}' concluída com sucesso!"
-            })
-        else:
-            conversions = load_conversions()
-            conversions['stats']['total'] = conversions['stats'].get('total', 0) + 1
-            conversions['stats']['failed'] = conversions['stats'].get('failed', 0) + 1
-            save_conversions(conversions)
-            
-            error_msg = result.get("errors", ["Erro desconhecido na conversão"])[0] if result.get("errors") else "Erro na conversão"
-            
-            return jsonify({
-                "success": False,
-                "error": error_msg,
-                "errors": result.get("errors", [])
-            })
-        
-    except concurrent.futures.TimeoutError:
-        return jsonify({
-            "success": False,
-            "error": "Timeout: A conversão excedeu o tempo limite de 2 horas"
-        })
-    except Exception as e:
-        print(f"Erro na conversão: {str(e)}")
-        
-        try:
-            conversions = load_conversions()
-            conversions['stats']['total'] = conversions['stats'].get('total', 0) + 1
-            conversions['stats']['failed'] = conversions['stats'].get('failed', 0) + 1
-            save_conversions(conversions)
-        except:
-            pass
-        
-        return jsonify({
-            "success": False,
-            "error": f"Erro interno: {str(e)}"
-        })
-
-# ... (outras rotas: serve_hls, player_page, health, etc.)
-
-# =============== FUNÇÃO PARA GERAR HTML DINÂMICO ===============
-
-def get_dashboard_html():
-    """Retorna o HTML completo do dashboard com as novas funcionalidades"""
-    # Gerar HTML dinâmico (muito extenso, será incluído no final)
-    return DASHBOARD_HTML
-
-# =============== HTML COMPLETO ===============
+# =============== PÁGINAS HTML COMPLETAS ===============
 
 LOGIN_HTML = '''
 <!DOCTYPE html>
@@ -1472,9 +1179,6 @@ CHANGE_PASSWORD_HTML = '''
 </html>
 '''
 
-# DASHBOARD_HTML será muito extenso, vou mostrar apenas as partes modificadas
-# O HTML completo será incluído no arquivo final
-
 DASHBOARD_HTML = '''
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -1484,7 +1188,719 @@ DASHBOARD_HTML = '''
     <title>🎬 HLS Converter ULTIMATE</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        /* ... (estilos existentes permanecem iguais) ... */
+        :root {
+            --primary: #4361ee;
+            --secondary: #3a0ca3;
+            --accent: #4cc9f0;
+            --success: #2ecc71;
+            --danger: #e74c3c;
+            --warning: #f39c12;
+            --dark: #2c3e50;
+            --light: #ecf0f1;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            color: var(--dark);
+            line-height: 1.6;
+        }
+        
+        .header {
+            background: linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%);
+            color: white;
+            padding: 20px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .logo i {
+            font-size: 2rem;
+        }
+        
+        .logo h1 {
+            font-size: 1.8rem;
+            font-weight: 600;
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .user-info span {
+            background: rgba(255,255,255,0.2);
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-weight: 500;
+        }
+        
+        .logout-btn {
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 8px 20px;
+            border-radius: 5px;
+            text-decoration: none;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .logout-btn:hover {
+            background: rgba(255,255,255,0.3);
+            transform: translateY(-1px);
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 30px auto;
+            padding: 0 20px;
+        }
+        
+        .nav-tabs {
+            display: flex;
+            background: white;
+            border-radius: 10px;
+            padding: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+            overflow-x: auto;
+        }
+        
+        .nav-tab {
+            padding: 15px 25px;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+        
+        .nav-tab:hover {
+            background: var(--light);
+        }
+        
+        .nav-tab.active {
+            background: var(--primary);
+            color: white;
+            box-shadow: 0 4px 10px rgba(67, 97, 238, 0.3);
+        }
+        
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.5s ease;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.08);
+            border: 1px solid #eaeaea;
+        }
+        
+        .card h2 {
+            color: var(--primary);
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #f0f0f0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .stat-item {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 25px;
+            border-radius: 10px;
+            text-align: center;
+            transition: transform 0.3s;
+        }
+        
+        .stat-item:hover {
+            transform: translateY(-5px);
+        }
+        
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            color: #6c757d;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .upload-area {
+            border: 3px dashed var(--primary);
+            border-radius: 12px;
+            padding: 60px 30px;
+            text-align: center;
+            margin: 30px 0;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: rgba(67, 97, 238, 0.02);
+        }
+        
+        .upload-area:hover {
+            background: rgba(67, 97, 238, 0.05);
+            border-color: var(--secondary);
+            transform: translateY(-2px);
+        }
+        
+        .upload-area i {
+            font-size: 4rem;
+            color: var(--primary);
+            margin-bottom: 20px;
+        }
+        
+        .upload-area h3 {
+            color: var(--dark);
+            margin-bottom: 10px;
+        }
+        
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(67, 97, 238, 0.3);
+        }
+        
+        .btn-success {
+            background: linear-gradient(90deg, var(--success) 0%, #27ae60 100%);
+            color: white;
+        }
+        
+        .btn-warning {
+            background: linear-gradient(90deg, var(--warning) 0%, #e67e22 100%);
+            color: white;
+        }
+        
+        .btn-danger {
+            background: linear-gradient(90deg, var(--danger) 0%, #c0392b 100%);
+            color: white;
+        }
+        
+        .conversions-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .conversion-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            border-left: 4px solid var(--accent);
+            transition: transform 0.3s;
+        }
+        
+        .conversion-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.12);
+        }
+        
+        .conversion-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .conversion-id {
+            font-family: monospace;
+            background: var(--light);
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 0.9rem;
+        }
+        
+        .conversion-status {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .conversion-info {
+            margin: 10px 0;
+        }
+        
+        .conversion-info p {
+            margin: 5px 0;
+            font-size: 0.9rem;
+        }
+        
+        .conversion-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .conversion-actions .btn {
+            padding: 8px 15px;
+            font-size: 0.85rem;
+            flex: 1;
+        }
+        
+        .progress-container {
+            background: #e9ecef;
+            border-radius: 10px;
+            height: 20px;
+            overflow: hidden;
+            margin: 20px 0;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent) 0%, var(--primary) 100%);
+            transition: width 0.5s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        
+        .quality-selector {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .quality-option {
+            background: var(--light);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 2px solid transparent;
+        }
+        
+        .quality-option:hover {
+            background: #e3e6ea;
+        }
+        
+        .quality-option.selected {
+            background: var(--primary);
+            color: white;
+            border-color: var(--secondary);
+        }
+        
+        .file-info {
+            background: var(--light);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            display: none;
+        }
+        
+        .file-info.show {
+            display: block;
+            animation: fadeIn 0.5s ease;
+        }
+        
+        .ffmpeg-status {
+            display: inline-block;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-weight: 600;
+            margin: 10px 0;
+        }
+        
+        .ffmpeg-ok {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .ffmpeg-error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+        
+        .empty-state i {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            color: #dee2e6;
+        }
+        
+        .system-status {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 12px;
+            margin-top: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .header {
+                flex-direction: column;
+                gap: 15px;
+                text-align: center;
+            }
+            
+            .nav-tabs {
+                flex-wrap: wrap;
+            }
+            
+            .nav-tab {
+                flex: 1;
+                min-width: 120px;
+                justify-content: center;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .conversions-list {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: white;
+            padding: 15px 25px;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            z-index: 1000;
+            animation: slideIn 0.3s ease;
+            border-left: 4px solid var(--primary);
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        .toast.success {
+            border-left-color: var(--success);
+        }
+        
+        .toast.error {
+            border-left-color: var(--danger);
+        }
+        
+        .toast.warning {
+            border-left-color: var(--warning);
+        }
+        
+        /* Estilos para multi-upload */
+        .selected-files {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .file-list {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            background: white;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            border: 1px solid #eaeaea;
+        }
+        
+        .file-item .file-name {
+            flex: 1;
+            font-weight: 500;
+        }
+        
+        .file-item .file-size {
+            color: #6c757d;
+            margin: 0 15px;
+        }
+        
+        .file-item .remove-file {
+            color: #e74c3c;
+            cursor: pointer;
+            background: none;
+            border: none;
+            font-size: 1.2rem;
+        }
+        
+        .upload-count {
+            background: var(--primary);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            margin-left: 10px;
+        }
+        
+        .processing-details {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            display: none;
+        }
+        
+        .processing-details.show {
+            display: block;
+        }
+        
+        .current-file {
+            font-weight: 600;
+            color: var(--primary);
+        }
+        
+        /* Estilos para campo de nome */
+        .conversion-name-input {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #4361ee;
+            border-radius: 10px;
+            font-size: 16px;
+            margin: 20px 0;
+            transition: all 0.3s;
+            background: #f8f9fa;
+        }
+        
+        .conversion-name-input:focus {
+            outline: none;
+            border-color: #3a0ca3;
+            box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.1);
+            background: white;
+        }
+        
+        /* Estilos para backup */
+        .backup-section {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+        
+        .backup-list {
+            max-height: 300px;
+            overflow-y: auto;
+            margin: 15px 0;
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            border: 1px solid #ddd;
+        }
+        
+        .backup-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .backup-item:last-child {
+            border-bottom: none;
+        }
+        
+        .backup-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .btn-backup {
+            background: linear-gradient(90deg, #2ecc71 0%, #27ae60 100%);
+            color: white;
+        }
+        
+        .btn-restore {
+            background: linear-gradient(90deg, #3498db 0%, #2980b9 100%);
+            color: white;
+        }
+        
+        /* Estilos para links gerados */
+        .links-container {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+            display: none;
+        }
+        
+        .links-container.show {
+            display: block;
+            animation: fadeIn 0.5s ease;
+        }
+        
+        .link-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 15px;
+            background: white;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border-left: 4px solid #4361ee;
+        }
+        
+        .link-info {
+            flex: 1;
+        }
+        
+        .link-title {
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        .link-url {
+            color: #666;
+            font-size: 0.9rem;
+            word-break: break-all;
+            user-select: all;
+        }
+        
+        .link-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 0.8rem;
+        }
+        
+        /* Estilos para links de vídeos individuais */
+        .video-links {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f0f8ff;
+            border-radius: 5px;
+            border-left: 3px solid #4cc9f0;
+        }
+        
+        .video-link-item {
+            margin: 5px 0;
+            padding: 8px;
+            background: white;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+        
+        /* Estilos para progresso em tempo real */
+        .real-time-progress {
+            background: linear-gradient(135deg, #4361ee 0%, #3a0ca3 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+            display: none;
+        }
+        
+        .real-time-progress.show {
+            display: block;
+        }
+        
+        .progress-text {
+            margin-top: 10px;
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+        
+        .current-processing {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
         
         /* Novos estilos para tabs de seleção de origem */
         .source-tabs {
@@ -1593,23 +2009,6 @@ DASHBOARD_HTML = '''
             padding: 20px;
             border-radius: 10px;
             margin-top: 20px;
-        }
-        
-        .upload-area {
-            border: 3px dashed #4361ee;
-            border-radius: 12px;
-            padding: 60px 30px;
-            text-align: center;
-            margin: 20px 0;
-            cursor: pointer;
-            transition: all 0.3s;
-            background: rgba(67, 97, 238, 0.02);
-        }
-        
-        .upload-area:hover {
-            background: rgba(67, 97, 238, 0.05);
-            border-color: #3a0ca3;
-            transform: translateY(-2px);
         }
         
         .selected-count {
@@ -1866,7 +2265,31 @@ DASHBOARD_HTML = '''
         
         <!-- Conversions Tab -->
         <div id="conversions" class="tab-content">
-            <!-- ... (conteúdo existente) ... -->
+            <div class="card">
+                <h2><i class="fas fa-history"></i> Histórico de Conversões</h2>
+                
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <div>
+                        <button class="btn btn-success" onclick="loadConversions()">
+                            <i class="fas fa-sync-alt"></i> Atualizar
+                        </button>
+                        <button class="btn btn-warning" onclick="clearHistory()">
+                            <i class="fas fa-trash-alt"></i> Limpar Histórico
+                        </button>
+                    </div>
+                    <div id="conversionStats" style="color: #666; font-size: 0.9rem;">
+                        Carregando estatísticas...
+                    </div>
+                </div>
+                
+                <div id="conversionsList">
+                    <div class="empty-state">
+                        <i class="fas fa-history"></i>
+                        <h3>Nenhuma conversão realizada ainda</h3>
+                        <p>Converta seu primeiro vídeo para ver o histórico aqui</p>
+                    </div>
+                </div>
+            </div>
         </div>
         
         <!-- Nova Tab: Vídeos Internos -->
@@ -1934,12 +2357,115 @@ DASHBOARD_HTML = '''
         
         <!-- Settings Tab -->
         <div id="settings" class="tab-content">
-            <!-- ... (conteúdo existente) ... -->
+            <div class="card">
+                <h2><i class="fas fa-cog"></i> Configurações do Sistema</h2>
+                
+                <div style="margin-top: 20px;">
+                    <h3><i class="fas fa-user-shield"></i> Segurança</h3>
+                    <button class="btn btn-primary" onclick="changePassword()" style="margin-top: 10px;">
+                        <i class="fas fa-key"></i> Alterar Minha Senha
+                    </button>
+                </div>
+                
+                <div style="margin-top: 30px;">
+                    <h3><i class="fas fa-hdd"></i> Armazenamento</h3>
+                    <div style="margin: 15px 0;">
+                        <label style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="keepOriginals" checked>
+                            Manter arquivos originais após conversão
+                        </label>
+                    </div>
+                    <button class="btn btn-warning" onclick="cleanupOldFiles()" style="margin-top: 10px;">
+                        <i class="fas fa-broom"></i> Limpar Arquivos Antigos
+                    </button>
+                </div>
+                
+                <div style="margin-top: 30px;">
+                    <h3><i class="fas fa-info-circle"></i> Informações do Sistema</h3>
+                    <div id="systemInfo" style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px;">
+                        Carregando informações...
+                    </div>
+                </div>
+            </div>
         </div>
         
         <!-- Backup Tab -->
         <div id="backup" class="tab-content">
-            <!-- ... (conteúdo existente) ... -->
+            <div class="card">
+                <h2><i class="fas fa-database"></i> Sistema de Backup</h2>
+                
+                <!-- Criar Backup -->
+                <div class="backup-section">
+                    <h3><i class="fas fa-plus-circle"></i> Criar Novo Backup</h3>
+                    <p style="color: #666; margin-bottom: 15px;">
+                        Crie um backup completo do sistema incluindo usuários, configurações e histórico.
+                    </p>
+                    
+                    <div style="display: flex; gap: 15px; align-items: center; margin-top: 20px;">
+                        <input type="text" 
+                               id="backupName" 
+                               placeholder="Nome do backup (opcional)" 
+                               style="flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 5px;">
+                        <button class="btn btn-backup" onclick="createBackup()">
+                            <i class="fas fa-save"></i> Criar Backup
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Lista de Backups -->
+                <div class="backup-section" style="margin-top: 30px;">
+                    <h3><i class="fas fa-history"></i> Backups Existentes</h3>
+                    <p style="color: #666; margin-bottom: 15px;">
+                        Gerencie seus backups existentes.
+                    </p>
+                    
+                    <div id="backupsList" class="backup-list">
+                        <div class="empty-state">
+                            <i class="fas fa-database"></i>
+                            <p>Nenhum backup encontrado</p>
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; gap: 10px; margin-top: 20px;">
+                        <button class="btn btn-backup" onclick="loadBackups()">
+                            <i class="fas fa-sync-alt"></i> Atualizar Lista
+                        </button>
+                        <button class="btn btn-danger" onclick="deleteAllBackups()">
+                            <i class="fas fa-trash-alt"></i> Limpar Tudo
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Restaurar Backup -->
+                <div class="backup-section" style="margin-top: 30px;">
+                    <h3><i class="fas fa-upload"></i> Restaurar Backup</h3>
+                    <p style="color: #666; margin-bottom: 15px;">
+                        Restaure o sistema a partir de um arquivo de backup.
+                    </p>
+                    
+                    <div style="margin-top: 20px;">
+                        <div class="upload-area" onclick="document.getElementById('restoreFile').click()">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                            <h3>Arraste e solte o arquivo de backup aqui</h3>
+                            <p>ou clique para selecionar (formato .tar.gz)</p>
+                        </div>
+                        <input type="file" id="restoreFile" accept=".tar.gz,.tgz" style="display: none;" onchange="handleRestoreFile()">
+                        
+                        <div id="selectedBackupFile" style="display: none; margin-top: 15px;">
+                            <div class="file-item">
+                                <span class="file-name" id="backupFileName"></span>
+                                <button class="remove-file" onclick="removeRestoreFile()">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <button class="btn btn-restore" onclick="restoreBackup()" id="restoreBtn" style="margin-top: 20px; width: 100%;">
+                            <i class="fas fa-upload"></i> Restaurar Sistema
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -2042,6 +2568,74 @@ DASHBOARD_HTML = '''
             
             // Atualizar botão de conversão
             updateConvertButton();
+        }
+        
+        // =============== SISTEMA ===============
+        function loadSystemStats() {
+            fetch('/api/system')
+                .then(response => {
+                    if (!response) {
+                        throw new Error('Sem resposta do servidor');
+                    }
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.error) {
+                        console.error('Erro ao carregar stats:', data.error);
+                        return;
+                    }
+                    
+                    document.getElementById('cpu').textContent = data.cpu || '--%';
+                    document.getElementById('memory').textContent = data.memory || '--%';
+                    document.getElementById('conversionsTotal').textContent = data.total_conversions || '0';
+                    document.getElementById('conversionsSuccess').textContent = data.success_conversions || '0';
+                    
+                    // Status do FFmpeg
+                    const ffmpegStatus = document.getElementById('ffmpegStatus');
+                    if (data.ffmpeg_status === 'ok') {
+                        ffmpegStatus.textContent = '✅ FFmpeg Disponível';
+                        ffmpegStatus.className = 'ffmpeg-status ffmpeg-ok';
+                        if (data.ffmpeg_path) {
+                            document.getElementById('ffmpegPath').textContent = `Local: ${data.ffmpeg_path}`;
+                        }
+                    } else {
+                        ffmpegStatus.textContent = '❌ FFmpeg Não Encontrado';
+                        ffmpegStatus.className = 'ffmpeg-status ffmpeg-error';
+                        document.getElementById('ffmpegPath').textContent = 'Execute: sudo apt-get install ffmpeg';
+                    }
+                })
+                .catch(error => {
+                    console.error('Erro ao carregar stats:', error);
+                    showToast('Erro ao carregar status do sistema', 'error');
+                });
+        }
+        
+        function refreshStats() {
+            loadSystemStats();
+            showToast('Status atualizado com sucesso', 'success');
+        }
+        
+        function testFFmpeg() {
+            fetch('/api/ffmpeg-test')
+                .then(response => {
+                    if (!response) {
+                        throw new Error('Sem resposta do servidor');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data && data.success) {
+                        showToast(`✅ FFmpeg funcionando! Versão: ${data.version}`, 'success');
+                    } else {
+                        showToast(`❌ FFmpeg não está funcionando: ${data?.error || 'Erro desconhecido'}`, 'error');
+                    }
+                })
+                .catch((error) => {
+                    showToast(`❌ Erro ao testar FFmpeg: ${error.message || 'Servidor não respondeu'}`, 'error');
+                });
         }
         
         // =============== UPLOAD DE ARQUIVOS EXTERNOS ===============
@@ -2638,8 +3232,562 @@ DASHBOARD_HTML = '''
             currentFile.textContent = filename || "Nenhum";
         }
         
-        // ... (restante das funções JavaScript permanecem iguais)
-        // Incluindo showConversionLinks, copyToClipboard, loadConversions, etc.
+        function showConversionLinks(data) {
+            const linksContainer = document.getElementById('linksContainer');
+            const linksList = document.getElementById('linksList');
+            
+            const baseUrl = window.location.origin;
+            let html = '';
+            
+            // Link principal da playlist master
+            html += `
+                <div class="link-item">
+                    <div class="link-info">
+                        <div class="link-title">🎬 ${data.conversion_name}</div>
+                        <div class="link-url">${baseUrl}/hls/${data.playlist_id}/master.m3u8</div>
+                        <small style="color: #666;">Playlist principal com todas as qualidades</small>
+                    </div>
+                    <div class="link-actions">
+                        <button class="btn btn-primary btn-sm" onclick="copyToClipboard('${baseUrl}/hls/${data.playlist_id}/master.m3u8')">
+                            <i class="fas fa-copy"></i> Copiar
+                        </button>
+                        <button class="btn btn-success btn-sm" onclick="window.open('/player/${data.playlist_id}', '_blank')">
+                            <i class="fas fa-play"></i> Player
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            // Links para cada qualidade
+            if (data.quality_links && Object.keys(data.quality_links).length > 0) {
+                html += '<h4 style="margin-top: 20px; color: #666;"><i class="fas fa-layer-group"></i> Qualidades Disponíveis:</h4>';
+                
+                for (const [quality, path] of Object.entries(data.quality_links)) {
+                    const fullUrl = `${baseUrl}${path}`;
+                    html += `
+                        <div class="link-item">
+                            <div class="link-info">
+                                <div class="link-title">${quality}</div>
+                                <div class="link-url">${fullUrl}</div>
+                            </div>
+                            <div class="link-actions">
+                                <button class="btn btn-primary btn-sm" onclick="copyToClipboard('${fullUrl}')">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+            
+            // Links para vídeos individuais (se existirem)
+            if (data.video_links && data.video_links.length > 0) {
+                html += `<div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #ddd;">
+                    <h4><i class="fas fa-file-video"></i> Links para Vídeos Individuais:</h4>`;
+                
+                data.video_links.forEach(video => {
+                    html += `<div class="video-links">`;
+                    html += `<div><strong>${video.filename}</strong></div>`;
+                    for (const [quality, path] of Object.entries(video.links)) {
+                        const fullUrl = `${baseUrl}/hls/${path}`;
+                        html += `
+                            <div class="video-link-item">
+                                ${quality}: ${fullUrl}
+                                <button class="btn btn-primary btn-sm" style="margin-left: 10px; padding: 2px 8px;" onclick="copyToClipboard('${fullUrl}')">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                        `;
+                    }
+                    html += `</div>`;
+                });
+                html += `</div>`;
+            }
+            
+            linksList.innerHTML = html;
+            linksContainer.classList.add('show');
+            
+            // Rolar para ver os links
+            linksContainer.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        function copyToClipboard(text) {
+            // Criar elemento temporário
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-999999px';
+            textArea.style.top = '-999999px';
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            
+            try {
+                document.execCommand('copy');
+                showToast('✅ Link copiado para a área de transferência!', 'success');
+            } catch (err) {
+                console.error('Erro ao copiar:', err);
+                showToast('❌ Erro ao copiar link', 'error');
+            } finally {
+                document.body.removeChild(textArea);
+            }
+        }
+        
+        // =============== HISTÓRICO DE CONVERSÕES ===============
+        function loadConversions() {
+            fetch('/api/conversions')
+                .then(response => {
+                    if (!response) {
+                        throw new Error('Sem resposta do servidor');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    const container = document.getElementById('conversionsList');
+                    const statsContainer = document.getElementById('conversionStats');
+                    
+                    // Atualizar estatísticas
+                    if (data.stats) {
+                        statsContainer.innerHTML = `
+                            Total: ${data.stats.total || 0} | 
+                            Sucesso: ${data.stats.success || 0} | 
+                            Falhas: ${data.stats.failed || 0}
+                        `;
+                    }
+                    
+                    if (!data.conversions || data.conversions.length === 0) {
+                        container.innerHTML = `
+                            <div class="empty-state">
+                                <i class="fas fa-history"></i>
+                                <h3>Nenhuma conversão realizada ainda</h3>
+                                <p>Converta seu primeiro vídeo para ver o histórico aqui</p>
+                            </div>
+                        `;
+                        return;
+                    }
+                    
+                    let html = '<div class="conversions-list">';
+                    
+                    const conversions = Array.isArray(data.conversions) ? data.conversions : [];
+                    
+                    conversions.forEach(conv => {
+                        const playlistId = conv.playlist_id || conv.video_id || conv.id || 'N/A';
+                        const filename = conv.filename || 'Arquivo desconhecido';
+                        const timestamp = conv.timestamp || new Date().toISOString();
+                        const qualities = Array.isArray(conv.qualities) ? conv.qualities : [];
+                        const status = conv.status || 'unknown';
+                        const conversionName = conv.conversion_name || conv.filename;
+                        
+                        html += `
+                            <div class="conversion-card">
+                                <div class="conversion-header">
+                                    <span class="conversion-id">${conversionName.substring(0, 20)}${conversionName.length > 20 ? '...' : ''}</span>
+                                    <span class="conversion-status status-${status}">
+                                        ${status === 'success' ? '✅ Sucesso' : '❌ Falha'}
+                                    </span>
+                                </div>
+                                <div class="conversion-info">
+                                    <p><strong>Nome:</strong> ${conversionName}</p>
+                                    <p><strong>Data:</strong> ${formatDate(timestamp)}</p>
+                                    <p><strong>Qualidades:</strong> ${qualities.join(', ') || 'N/A'}</p>
+                                    <p><strong>Arquivos:</strong> ${conv.videos_count || 1}</p>
+                                </div>
+                                <div class="conversion-actions">
+                                    <button class="btn btn-primary" onclick="copyConversionLink('${playlistId}')">
+                                        <i class="fas fa-link"></i> Link
+                                    </button>
+                                    <button class="btn btn-success" onclick="playVideo('${playlistId}')">
+                                        <i class="fas fa-play"></i> Play
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    html += '</div>';
+                    container.innerHTML = html;
+                })
+                .catch(error => {
+                    console.error('Erro ao carregar conversões:', error);
+                    document.getElementById('conversionsList').innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <h3>Erro ao carregar histórico</h3>
+                            <p>${error.message}</p>
+                        </div>
+                    `;
+                    showToast('Erro ao carregar histórico de conversões', 'error');
+                });
+        }
+        
+        function clearHistory() {
+            if (confirm('Tem certeza que deseja limpar todo o histórico de conversões?')) {
+                fetch('/api/clear-history', { method: 'POST' })
+                    .then(response => {
+                        if (!response) {
+                            throw new Error('Sem resposta do servidor');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data.success) {
+                            showToast('✅ Histórico limpo com sucesso!', 'success');
+                            loadConversions();
+                            loadSystemStats();
+                        } else {
+                            showToast(`❌ Erro: ${data.error}`, 'error');
+                        }
+                    })
+                    .catch(error => {
+                        showToast('❌ Erro ao limpar histórico', 'error');
+                    });
+            }
+        }
+        
+        function copyConversionLink(playlistId) {
+            const link = window.location.origin + '/hls/' + playlistId + '/master.m3u8';
+            copyToClipboard(link);
+        }
+        
+        function playVideo(playlistId) {
+            window.open('/player/' + playlistId, '_blank');
+        }
+        
+        // =============== CONFIGURAÇÕES ===============
+        function changePassword() {
+            window.location.href = '/change-password';
+        }
+        
+        function cleanupFiles() {
+            if (confirm('Limpar todos os arquivos temporários e convertidos?')) {
+                fetch('/api/cleanup', { method: 'POST' })
+                    .then(response => {
+                        if (!response) {
+                            throw new Error('Sem resposta do servidor');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data.success) {
+                            showToast(`✅ ${data.message}`, 'success');
+                        } else {
+                            showToast(`❌ Erro: ${data.error}`, 'error');
+                        }
+                    })
+                    .catch(() => {
+                        showToast('❌ Erro ao limpar arquivos', 'error');
+                    });
+            }
+        }
+        
+        function cleanupOldFiles() {
+            if (confirm('Limpar arquivos antigos (mais de 7 dias)?')) {
+                fetch('/api/cleanup-old', { method: 'POST' })
+                    .then(response => {
+                        if (!response) {
+                            throw new Error('Sem resposta do servidor');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        showToast(data.message || '✅ Arquivos antigos removidos', 'success');
+                    })
+                    .catch(() => {
+                        showToast('❌ Erro ao limpar arquivos antigos', 'error');
+                    });
+            }
+        }
+        
+        function loadSystemInfo() {
+            fetch('/api/system-info')
+                .then(response => {
+                    if (!response) {
+                        throw new Error('Sem resposta do servidor');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    const container = document.getElementById('systemInfo');
+                    container.innerHTML = `
+                        <p><strong>Versão:</strong> ${data.version || 'N/A'}</p>
+                        <p><strong>Diretório:</strong> ${data.base_dir || 'N/A'}</p>
+                        <p><strong>Usuários:</strong> ${data.users_count || 0}</p>
+                        <p><strong>Serviço:</strong> ${data.service_status || 'N/A'}</p>
+                        <p><strong>Uptime:</strong> ${data.uptime || 'N/A'}</p>
+                        <p><strong>Backup:</strong> ${data.backup_enabled ? 'Habilitado' : 'Desabilitado'}</p>
+                    `;
+                })
+                .catch(error => {
+                    document.getElementById('systemInfo').innerHTML = 'Erro ao carregar informações';
+                });
+        }
+        
+        // =============== BACKUP ===============
+        function createBackup() {
+            const backupName = document.getElementById('backupName').value.trim();
+            const nameParam = backupName ? `?name=${encodeURIComponent(backupName)}` : '';
+            
+            showToast('Criando backup...', 'info');
+            
+            fetch(`/api/backup/create${nameParam}`, { method: 'POST' })
+                .then(response => {
+                    if (!response) {
+                        throw new Error('Sem resposta do servidor');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.success) {
+                        showToast(`✅ Backup criado: ${data.backup_name} (${formatBytes(data.size)})`, 'success');
+                        document.getElementById('backupName').value = '';
+                        loadBackups();
+                        
+                        // Oferecer download
+                        if (confirm('Deseja baixar o backup agora?')) {
+                            window.open(`/api/backup/download/${data.backup_name}`, '_blank');
+                        }
+                    } else {
+                        showToast(`❌ Erro: ${data.error}`, 'error');
+                    }
+                })
+                .catch(error => {
+                    showToast(`❌ Erro de conexão: ${error.message}`, 'error');
+                });
+        }
+        
+        function loadBackups() {
+            fetch('/api/backup/list')
+                .then(response => {
+                    if (!response) {
+                        throw new Error('Sem resposta do servidor');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    const container = document.getElementById('backupsList');
+                    
+                    if (!data.backups || data.backups.length === 0) {
+                        container.innerHTML = `
+                            <div class="empty-state">
+                                <i class="fas fa-database"></i>
+                                <p>Nenhum backup encontrado</p>
+                        </div>
+                        `;
+                        return;
+                    }
+                    
+                    let html = '';
+                    data.backups.forEach(backup => {
+                        html += `
+                            <div class="backup-item">
+                                <div>
+                                    <strong>${backup.name}</strong><br>
+                                    <small style="color: #666;">
+                                        ${formatDate(backup.modified)} • ${formatBytes(backup.size)}
+                                    </small>
+                                </div>
+                                <div class="backup-actions">
+                                    <button class="btn btn-restore btn-sm" onclick="downloadBackup('${backup.name}')">
+                                        <i class="fas fa-download"></i>
+                                    </button>
+                                    <button class="btn btn-backup btn-sm" onclick="restoreSpecificBackup('${backup.name}')">
+                                        <i class="fas fa-upload"></i>
+                                    </button>
+                                    <button class="btn btn-danger btn-sm" onclick="deleteBackup('${backup.name}')">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    container.innerHTML = html;
+                })
+                .catch(error => {
+                    showToast('Erro ao carregar backups', 'error');
+                });
+        }
+        
+        function downloadBackup(backupName) {
+            window.open(`/api/backup/download/${backupName}`, '_blank');
+        }
+        
+        function restoreSpecificBackup(backupName) {
+            if (confirm(`Restaurar backup "${backupName}"? O sistema será reiniciado.`)) {
+                fetch(`/api/backup/restore/${backupName}`, { method: 'POST' })
+                    .then(response => {
+                        if (!response) {
+                            throw new Error('Sem resposta do servidor');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data.success) {
+                            showToast('✅ Backup restaurado! Reiniciando...', 'success');
+                            setTimeout(() => {
+                                window.location.reload();
+                            }, 2000);
+                        } else {
+                            showToast(`❌ Erro: ${data.error}`, 'error');
+                        }
+                    })
+                    .catch(error => {
+                        showToast('Erro ao restaurar backup', 'error');
+                    });
+            }
+        }
+        
+        function deleteBackup(backupName) {
+            if (confirm(`Excluir backup "${backupName}" permanentemente?`)) {
+                fetch(`/api/backup/delete/${backupName}`, { method: 'DELETE' })
+                    .then(response => {
+                        if (!response) {
+                            throw new Error('Sem resposta do servidor');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data.success) {
+                            showToast('✅ Backup excluído', 'success');
+                            loadBackups();
+                        } else {
+                            showToast(`❌ Erro: ${data.error}`, 'error');
+                        }
+                    })
+                    .catch(error => {
+                        showToast('Erro ao excluir backup', 'error');
+                    });
+            }
+        }
+        
+        function deleteAllBackups() {
+            if (confirm('Excluir TODOS os backups permanentemente?')) {
+                fetch('/api/backup/delete-all', { method: 'DELETE' })
+                    .then(response => {
+                        if (!response) {
+                            throw new Error('Sem resposta do servidor');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data.success) {
+                            showToast(`✅ ${data.deleted} backups excluídos`, 'success');
+                            loadBackups();
+                        } else {
+                            showToast(`❌ Erro: ${data.error}`, 'error');
+                        }
+                    })
+                    .catch(error => {
+                        showToast('Erro ao excluir backups', 'error');
+                    });
+            }
+        }
+        
+        function handleRestoreFile() {
+            const fileInput = document.getElementById('restoreFile');
+            if (fileInput.files.length > 0) {
+                const file = fileInput.files[0];
+                if (!file.name.endsWith('.tar.gz') && !file.name.endsWith('.tgz')) {
+                    showToast('Por favor, selecione um arquivo .tar.gz', 'error');
+                    fileInput.value = '';
+                    return;
+                }
+                
+                restoreFileData = file;
+                document.getElementById('backupFileName').textContent = file.name;
+                document.getElementById('selectedBackupFile').style.display = 'block';
+            }
+        }
+        
+        function removeRestoreFile() {
+            document.getElementById('restoreFile').value = '';
+            document.getElementById('selectedBackupFile').style.display = 'none';
+            restoreFileData = null;
+        }
+        
+        function restoreBackup() {
+            if (!restoreFileData) {
+                showToast('Por favor, selecione um arquivo de backup', 'warning');
+                return;
+            }
+            
+            if (!confirm('ATENÇÃO: Restaurar backup substituirá todas as configurações atuais. Continuar?')) {
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('backup', restoreFileData);
+            
+            const restoreBtn = document.getElementById('restoreBtn');
+            const originalBtnText = restoreBtn.innerHTML;
+            restoreBtn.disabled = true;
+            restoreBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Restaurando...';
+            
+            fetch('/api/backup/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response) {
+                    throw new Error('Sem resposta do servidor');
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    showToast('✅ Backup restaurado! Reiniciando sistema...', 'success');
+                    setTimeout(() => {
+                        window.location.href = '/login';
+                    }, 3000);
+                } else {
+                    showToast(`❌ Erro: ${data.error}`, 'error');
+                    restoreBtn.disabled = false;
+                    restoreBtn.innerHTML = originalBtnText;
+                }
+            })
+            .catch(error => {
+                showToast(`❌ Erro: ${error.message}`, 'error');
+                restoreBtn.disabled = false;
+                restoreBtn.innerHTML = originalBtnText;
+            });
+        }
+        
+        // =============== UTILITÁRIOS ===============
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+        
+        function formatDate(timestamp) {
+            try {
+                const date = new Date(timestamp);
+                return date.toLocaleString('pt-BR');
+            } catch {
+                return 'Data inválida';
+            }
+        }
+        
+        function showToast(message, type = 'info') {
+            // Remover toasts anteriores
+            document.querySelectorAll('.toast').forEach(toast => toast.remove());
+            
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `
+                <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i>
+                <span>${message}</span>
+            `;
+            
+            document.body.appendChild(toast);
+            
+            // Remover após 5 segundos
+            setTimeout(() => {
+                toast.remove();
+            }, 5000);
+        }
         
         // =============== INICIALIZAÇÃO ===============
         document.addEventListener('DOMContentLoaded', function() {
@@ -2758,9 +3906,371 @@ DASHBOARD_HTML = '''
 </html>
 '''
 
-# ... (restante do código com as outras rotas e funções)
+# =============== ROTAS PRINCIPAIS ===============
+
+@app.route('/')
+def index():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    
+    if password_change_required(session['user_id']):
+        return redirect(url_for('change_password'))
+    
+    return render_template_string(DASHBOARD_HTML)
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'GET':
+        if 'user_id' in session:
+            return redirect(url_for('index'))
+        return render_template_string(LOGIN_HTML)
+    
+    username = request.form.get('username', '').strip()
+    password = request.form.get('password', '').strip()
+    
+    if not username or not password:
+        flash('Por favor, preencha todos os campos', 'error')
+        return render_template_string(LOGIN_HTML)
+    
+    if check_password(username, password):
+        users = load_users()
+        if username in users.get('users', {}):
+            users['users'][username]['last_login'] = datetime.now().isoformat()
+            save_users(users)
+        
+        session['user_id'] = username
+        session['login_time'] = datetime.now().isoformat()
+        
+        if password_change_required(username):
+            return redirect(url_for('change_password'))
+        
+        log_activity(f"Usuário {username} fez login")
+        return redirect(url_for('index'))
+    else:
+        flash('Usuário ou senha incorretos', 'error')
+        return render_template_string(LOGIN_HTML)
+
+@app.route('/change-password', methods=['GET', 'POST'])
+def change_password():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    
+    if request.method == 'GET':
+        return render_template_string(CHANGE_PASSWORD_HTML)
+    
+    username = session['user_id']
+    current_password = request.form.get('current_password', '').strip()
+    new_password = request.form.get('new_password', '').strip()
+    confirm_password = request.form.get('confirm_password', '').strip()
+    
+    errors = []
+    
+    if not all([current_password, new_password, confirm_password]):
+        errors.append('Todos os campos são obrigatórios')
+    
+    if new_password != confirm_password:
+        errors.append('As senhas não coincidem')
+    
+    if len(new_password) < 8:
+        errors.append('A senha deve ter pelo menos 8 caracteres')
+    
+    if current_password == new_password:
+        errors.append('A nova senha não pode ser igual à atual')
+    
+    if not check_password(username, current_password):
+        errors.append('Senha atual incorreta')
+    
+    if errors:
+        for error in errors:
+            flash(error, 'error')
+        return render_template_string(CHANGE_PASSWORD_HTML)
+    
+    try:
+        new_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        users = load_users()
+        users['users'][username]['password'] = new_hash
+        users['users'][username]['password_changed'] = True
+        users['users'][username]['last_password_change'] = datetime.now().isoformat()
+        save_users(users)
+        
+        flash('✅ Senha alterada com sucesso!', 'success')
+        log_activity(f"Usuário {username} alterou a senha")
+        return redirect(url_for('index'))
+    except Exception as e:
+        flash(f'Erro ao alterar senha: {str(e)}', 'error')
+        return render_template_string(CHANGE_PASSWORD_HTML)
+
+@app.route('/logout')
+def logout():
+    if 'user_id' in session:
+        log_activity(f"Usuário {session['user_id']} fez logout")
+        session.clear()
+    flash('✅ Você foi desconectado com sucesso', 'info')
+    return redirect(url_for('login'))
+
+# =============== ROTAS DE API ===============
+
+@app.route('/api/system')
+def api_system():
+    """Endpoint para informações do sistema"""
+    try:
+        cpu = psutil.cpu_percent(interval=0.1)
+        memory = psutil.virtual_memory()
+        
+        conversions = load_conversions()
+        
+        ffmpeg_path = find_ffmpeg()
+        
+        return jsonify({
+            "cpu": f"{cpu:.1f}%",
+            "memory": f"{memory.percent:.1f}%",
+            "total_conversions": conversions["stats"]["total"],
+            "success_conversions": conversions["stats"]["success"],
+            "failed_conversions": conversions["stats"]["failed"],
+            "ffmpeg_status": "ok" if ffmpeg_path else "missing",
+            "ffmpeg_path": ffmpeg_path or "Não encontrado"
+        })
+    except Exception as e:
+        return jsonify({
+            "error": str(e),
+            "ffmpeg_status": "error"
+        })
+
+@app.route('/api/conversions')
+def api_conversions():
+    """Endpoint para listar conversões"""
+    try:
+        data = load_conversions()
+        
+        if not isinstance(data.get('conversions'), list):
+            data['conversions'] = []
+        
+        try:
+            data['conversions'].sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+        except:
+            pass
+        
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({
+            "error": str(e),
+            "conversions": [],
+            "stats": {"total": 0, "success": 0, "failed": 0}
+        })
+
+@app.route('/api/progress/<playlist_id>')
+def api_progress(playlist_id):
+    """Endpoint para obter progresso da conversão"""
+    progress = get_progress(playlist_id)
+    return jsonify(progress)
+
+@app.route('/api/clear-history', methods=['POST'])
+def api_clear_history():
+    """Limpar histórico de conversões"""
+    try:
+        data = load_conversions()
+        count = len(data.get('conversions', []))
+        
+        data['conversions'] = []
+        data['stats']['total'] = 0
+        data['stats']['success'] = 0
+        data['stats']['failed'] = 0
+        
+        save_conversions(data)
+        
+        log_activity(f"Histórico de conversões limpo: {count} entradas removidas")
+        
+        return jsonify({
+            "success": True,
+            "message": f"{count} conversões removidas do histórico"
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
+
+@app.route('/api/cleanup', methods=['POST'])
+def api_cleanup():
+    """Limpar todos os arquivos"""
+    try:
+        deleted_count = 0
+        
+        if os.path.exists(UPLOAD_DIR):
+            for filename in os.listdir(UPLOAD_DIR):
+                filepath = os.path.join(UPLOAD_DIR, filename)
+                if os.path.isfile(filepath):
+                    os.remove(filepath)
+                    deleted_count += 1
+        
+        if os.path.exists(HLS_DIR):
+            for item in os.listdir(HLS_DIR):
+                item_path = os.path.join(HLS_DIR, item)
+                if os.path.isdir(item_path) and item not in ['240p', '360p', '480p', '720p', '1080p', 'original']:
+                    shutil.rmtree(item_path, ignore_errors=True)
+                    deleted_count += 1
+        
+        log_activity(f"Limpeza realizada: {deleted_count} arquivos removidos")
+        
+        return jsonify({
+            "success": True,
+            "message": f"{deleted_count} arquivos removidos"
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
+
+@app.route('/api/cleanup-old', methods=['POST'])
+def api_cleanup_old():
+    """Limpar arquivos antigos"""
+    try:
+        deleted_count = 0
+        now = time.time()
+        
+        if os.path.exists(UPLOAD_DIR):
+            for filename in os.listdir(UPLOAD_DIR):
+                filepath = os.path.join(UPLOAD_DIR, filename)
+                if os.path.isfile(filepath):
+                    file_age = now - os.path.getmtime(filepath)
+                    if file_age > 7 * 24 * 3600:
+                        os.remove(filepath)
+                        deleted_count += 1
+        
+        if os.path.exists(HLS_DIR):
+            for item in os.listdir(HLS_DIR):
+                item_path = os.path.join(HLS_DIR, item)
+                if os.path.isdir(item_path):
+                    dir_age = now - os.path.getmtime(item_path)
+                    if dir_age > 7 * 24 * 3600:
+                        shutil.rmtree(item_path, ignore_errors=True)
+                        deleted_count += 1
+        
+        return jsonify({
+            "success": True,
+            "message": f"{deleted_count} arquivos/diretórios antigos removidos"
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
+
+@app.route('/api/ffmpeg-test')
+def api_ffmpeg_test():
+    """Testar FFmpeg"""
+    ffmpeg_path = find_ffmpeg()
+    
+    if not ffmpeg_path:
+        return jsonify({
+            "success": False,
+            "error": "FFmpeg não encontrado"
+        })
+    
+    try:
+        result = subprocess.run(
+            [ffmpeg_path, '-version'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        
+        if result.returncode == 0:
+            version_line = result.stdout.split('\n')[0]
+            version = version_line.split(' ')[2] if len(version_line.split(' ')) > 2 else "unknown"
+            
+            return jsonify({
+                "success": True,
+                "version": version,
+                "path": ffmpeg_path
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": f"FFmpeg retornou código {result.returncode}"
+            })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
+
+@app.route('/api/system-info')
+def api_system_info():
+    """Informações detalhadas do sistema"""
+    try:
+        users = load_users()
+        
+        return jsonify({
+            "version": "3.0.0",
+            "base_dir": BASE_DIR,
+            "users_count": len(users.get('users', {})),
+            "service_status": "running",
+            "uptime": str(datetime.now() - datetime.fromtimestamp(psutil.boot_time())).split('.')[0],
+            "ffmpeg": "installed" if find_ffmpeg() else "not installed",
+            "multi_upload": True,
+            "backup_enabled": True,
+            "internal_videos": True
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
 
 # =============== ROTAS PARA VÍDEOS INTERNOS ===============
+
+@app.route('/api/videos-internos')
+def api_videos_internos():
+    """Lista todos os vídeos internos"""
+    if 'user_id' not in session:
+        return jsonify({"success": False, "error": "Não autenticado"}), 401
+    
+    videos = list_videos_internos()
+    return jsonify({
+        "success": True,
+        "videos": videos,
+        "count": len(videos)
+    })
+
+@app.route('/api/videos-internos/upload', methods=['POST'])
+def api_videos_internos_upload():
+    """Faz upload de vídeos para o diretório interno"""
+    if 'user_id' not in session:
+        return jsonify({"success": False, "error": "Não autenticado"}), 401
+    
+    if 'files[]' not in request.files:
+        return jsonify({"success": False, "error": "Nenhum arquivo enviado"})
+    
+    files = request.files.getlist('files[]')
+    results = []
+    
+    for file in files:
+        if file.filename == '':
+            continue
+        
+        result = upload_video_interno(file)
+        results.append(result)
+        
+        if result.get('success'):
+            log_activity(f"Usuário {session['user_id']} fez upload interno: {result['filename']}")
+    
+    return jsonify({
+        "success": True,
+        "results": results,
+        "uploaded": len([r for r in results if r.get('success')])
+    })
+
+@app.route('/api/videos-internos/delete/<filename>', methods=['DELETE'])
+def api_videos_internos_delete(filename):
+    """Exclui um vídeo interno"""
+    if 'user_id' not in session:
+        return jsonify({"success": False, "error": "Não autenticado"}), 401
+    
+    result = delete_video_interno(filename)
+    
+    if result.get('success'):
+        log_activity(f"Usuário {session['user_id']} excluiu vídeo interno: {filename}")
+    
+    return jsonify(result)
 
 @app.route('/api/videos-internos/preview/<filename>')
 def api_videos_internos_preview(filename):
@@ -2851,30 +4361,529 @@ def api_videos_internos_stream(filename):
     if not os.path.exists(filepath):
         return "Arquivo não encontrado", 404
     
-    range_header = request.headers.get('Range', None)
+    # Determinar tipo MIME
+    mime_type, _ = mimetypes.guess_type(filepath)
+    if not mime_type:
+        mime_type = 'video/mp4'
     
-    def generate():
-        with open(filepath, 'rb') as f:
-            while True:
-                data = f.read(1024 * 1024)  # Ler 1MB por vez
-                if not data:
-                    break
-                yield data
+    return send_file(filepath, mimetype=mime_type)
+
+# =============== ROTAS DE BACKUP ===============
+
+@app.route('/api/backup/create', methods=['POST'])
+def api_backup_create():
+    """Criar um novo backup"""
+    if 'user_id' not in session:
+        return jsonify({"success": False, "error": "Não autenticado"}), 401
     
-    file_size = os.path.getsize(filepath)
+    backup_name = request.args.get('name', None)
     
-    if range_header:
-        # Suporte a range requests para streaming
-        from werkzeug.wrappers import Response
-        return Response(generate(), 206, mimetype='video/mp4',
-                       direct_passthrough=True,
-                       headers={
-                           'Content-Type': 'video/mp4',
-                           'Accept-Ranges': 'bytes',
-                           'Content-Length': str(file_size)
-                       })
+    result = create_backup(backup_name)
+    
+    if result['success']:
+        log_activity(f"Usuário {session['user_id']} criou backup: {result['backup_name']}")
+    
+    return jsonify(result)
+
+@app.route('/api/backup/list')
+def api_backup_list():
+    """Listar todos os backups"""
+    if 'user_id' not in session:
+        return jsonify({"success": False, "error": "Não autenticado"}), 401
+    
+    backups = list_backups()
+    
+    return jsonify({
+        "success": True,
+        "backups": backups,
+        "count": len(backups)
+    })
+
+@app.route('/api/backup/download/<backup_name>')
+def api_backup_download(backup_name):
+    """Download de um backup"""
+    if 'user_id' not in session:
+        return "Não autenticado", 401
+    
+    backup_path = os.path.join(BACKUP_DIR, backup_name)
+    
+    if not os.path.exists(backup_path):
+        return "Backup não encontrado", 404
+    
+    log_activity(f"Usuário {session['user_id']} baixou backup: {backup_name}")
+    
+    return send_file(backup_path, as_attachment=True)
+
+@app.route('/api/backup/restore/<backup_name>', methods=['POST'])
+def api_backup_restore(backup_name):
+    """Restaurar um backup específico"""
+    if 'user_id' not in session:
+        return jsonify({"success": False, "error": "Não autenticado"}), 401
+    
+    backup_path = os.path.join(BACKUP_DIR, backup_name)
+    
+    if not os.path.exists(backup_path):
+        return jsonify({"success": False, "error": "Backup não encontrado"})
+    
+    result = restore_backup(backup_path)
+    
+    if result['success']:
+        log_activity(f"Usuário {session['user_id']} restaurou backup: {backup_name}")
+    
+    return jsonify(result)
+
+@app.route('/api/backup/upload', methods=['POST'])
+def api_backup_upload():
+    """Upload e restauração de backup"""
+    if 'user_id' not in session:
+        return jsonify({"success": False, "error": "Não autenticado"}), 401
+    
+    if 'backup' not in request.files:
+        return jsonify({"success": False, "error": "Nenhum arquivo enviado"})
+    
+    file = request.files['backup']
+    if file.filename == '':
+        return jsonify({"success": False, "error": "Nenhum arquivo selecionado"})
+    
+    if not (file.filename.endswith('.tar.gz') or file.filename.endswith('.tgz')):
+        return jsonify({"success": False, "error": "Formato inválido. Use .tar.gz"})
+    
+    temp_path = os.path.join(tempfile.gettempdir(), f"restore_{uuid.uuid4().hex}.tar.gz")
+    file.save(temp_path)
+    
+    result = restore_backup(temp_path)
+    
+    try:
+        os.remove(temp_path)
+    except:
+        pass
+    
+    if result['success']:
+        log_activity(f"Usuário {session['user_id']} restaurou sistema via upload")
+    
+    return jsonify(result)
+
+@app.route('/api/backup/delete/<backup_name>', methods=['DELETE'])
+def api_backup_delete(backup_name):
+    """Excluir um backup"""
+    if 'user_id' not in session:
+        return jsonify({"success": False, "error": "Não autenticado"}), 401
+    
+    backup_path = os.path.join(BACKUP_DIR, backup_name)
+    
+    if not os.path.exists(backup_path):
+        return jsonify({"success": False, "error": "Backup não encontrado"})
+    
+    try:
+        os.remove(backup_path)
+        log_activity(f"Usuário {session['user_id']} excluiu backup: {backup_name}")
+        
+        return jsonify({
+            "success": True,
+            "message": f"Backup {backup_name} excluído"
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
+
+@app.route('/api/backup/delete-all', methods=['DELETE'])
+def api_backup_delete_all():
+    """Excluir todos os backups"""
+    if 'user_id' not in session:
+        return jsonify({"success": False, "error": "Não autenticado"}), 401
+    
+    try:
+        deleted = 0
+        for filename in os.listdir(BACKUP_DIR):
+            if filename.endswith('.tar.gz'):
+                filepath = os.path.join(BACKUP_DIR, filename)
+                os.remove(filepath)
+                deleted += 1
+        
+        log_activity(f"Usuário {session['user_id']} excluiu todos os backups ({deleted} arquivos)")
+        
+        return jsonify({
+            "success": True,
+            "deleted": deleted,
+            "message": f"{deleted} backups excluídos"
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
+
+# =============== ROTA DE CONVERSÃO UNIFICADA ===============
+
+@app.route('/convert', methods=['POST'])
+def convert_videos():
+    """Converter vídeos (externos ou internos) - VERSÃO UNIFICADA"""
+    if 'user_id' not in session:
+        return jsonify({"success": False, "error": "Não autenticado"}), 401
+    
+    print(f"[DEBUG] Iniciando conversão para usuário: {session['user_id']}")
+    
+    try:
+        ffmpeg_path = find_ffmpeg()
+        if not ffmpeg_path:
+            print("[DEBUG] FFmpeg não encontrado")
+            return jsonify({
+                "success": False,
+                "error": "FFmpeg não encontrado. Execute: sudo apt-get install ffmpeg"
+            })
+        
+        conversion_type = request.form.get('conversion_type', 'upload')  # 'upload' ou 'internal'
+        conversion_name = request.form.get('conversion_name', '').strip()
+        qualities_json = request.form.get('qualities', '["720p"]')
+        
+        try:
+            qualities = json.loads(qualities_json)
+        except:
+            qualities = ["720p"]
+        
+        if not conversion_name:
+            conversion_name = f"Conversão {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        
+        conversion_name = sanitize_filename(conversion_name)
+        print(f"[DEBUG] Tipo: {conversion_type}, Nome: {conversion_name}, Qualidades: {qualities}")
+        
+        videos_list = []
+        
+        if conversion_type == 'upload':
+            # Processar arquivos enviados
+            if 'files[]' not in request.files:
+                return jsonify({"success": False, "error": "Nenhum arquivo enviado"})
+            
+            files = request.files.getlist('files[]')
+            if not files or files[0].filename == '':
+                return jsonify({"success": False, "error": "Nenhum arquivo selecionado"})
+            
+            for file in files:
+                # Salvar temporariamente no diretório de uploads
+                temp_filename = f"{uuid.uuid4().hex}_{file.filename}"
+                temp_path = os.path.join(UPLOAD_DIR, temp_filename)
+                file.save(temp_path)
+                
+                videos_list.append({
+                    "path": temp_path,
+                    "filename": file.filename,
+                    "type": "upload"
+                })
+            
+        elif conversion_type == 'internal':
+            # Processar arquivos internos selecionados
+            selected_files_json = request.form.get('selected_internal_files', '[]')
+            try:
+                selected_files = json.loads(selected_files_json)
+            except:
+                return jsonify({"success": False, "error": "Erro ao processar arquivos selecionados"})
+            
+            for filename in selected_files:
+                filepath = os.path.join(VIDEOS_INTERNOS_DIR, filename)
+                if os.path.exists(filepath):
+                    videos_list.append({
+                        "path": filepath,
+                        "filename": filename,
+                        "type": "internal"
+                    })
+                else:
+                    return jsonify({"success": False, "error": f"Arquivo não encontrado: {filename}"})
+        
+        else:
+            return jsonify({"success": False, "error": "Tipo de conversão inválido"})
+        
+        if not videos_list:
+            return jsonify({"success": False, "error": "Nenhum vídeo selecionado para conversão"})
+        
+        playlist_id = str(uuid.uuid4())[:8]
+        
+        # Inicializar progresso
+        update_progress(playlist_id, 0, len(videos_list), "Iniciando conversão...", "")
+        
+        print(f"Iniciando conversão: {len(videos_list)} arquivos, nome: {conversion_name}")
+        
+        # Processar em thread
+        def conversion_task():
+            return process_videos_from_list(videos_list, qualities, playlist_id, conversion_name)
+        
+        future = executor.submit(conversion_task)
+        result = future.result(timeout=7200)  # Timeout de 2 horas
+        
+        print(f"Resultado da conversão: {result.get('success', False)}")
+        
+        if result.get("success", False):
+            conversions = load_conversions()
+            conversion_data = {
+                "playlist_id": playlist_id,
+                "video_id": playlist_id,
+                "conversion_name": conversion_name,
+                "filename": f"{len(videos_list)} arquivos",
+                "qualities": qualities,
+                "timestamp": datetime.now().isoformat(),
+                "status": "success",
+                "type": conversion_type,
+                "videos_count": len(videos_list),
+                "videos_converted": result.get("videos_converted", 0),
+                "m3u8_url": f"/hls/{playlist_id}/master.m3u8",
+                "player_url": f"/player/{playlist_id}",
+                "details": result.get("videos_info", [])
+            }
+            
+            if not isinstance(conversions.get('conversions'), list):
+                conversions['conversions'] = []
+            
+            conversions['conversions'].insert(0, conversion_data)
+            conversions['stats']['total'] = conversions['stats'].get('total', 0) + 1
+            conversions['stats']['success'] = conversions['stats'].get('success', 0) + 1
+            
+            save_conversions(conversions)
+            
+            log_activity(f"Conversão '{conversion_name}' realizada: {len(videos_list)} arquivos -> {playlist_id}")
+            
+            return jsonify({
+                "success": True,
+                "playlist_id": playlist_id,
+                "conversion_name": conversion_name,
+                "videos_count": len(videos_list),
+                "videos_converted": result.get("videos_converted", 0),
+                "qualities": result.get("qualities", qualities),
+                "m3u8_url": f"/hls/{playlist_id}/master.m3u8",
+                "player_url": f"/player/{playlist_id}",
+                "quality_links": result.get("quality_links", {}),
+                "video_links": result.get("video_links", []),
+                "errors": result.get("errors", []),
+                "message": f"Conversão '{conversion_name}' concluída com sucesso!"
+            })
+        else:
+            conversions = load_conversions()
+            conversions['stats']['total'] = conversions['stats'].get('total', 0) + 1
+            conversions['stats']['failed'] = conversions['stats'].get('failed', 0) + 1
+            save_conversions(conversions)
+            
+            error_msg = result.get("errors", ["Erro desconhecido na conversão"])[0] if result.get("errors") else "Erro na conversão"
+            
+            return jsonify({
+                "success": False,
+                "error": error_msg,
+                "errors": result.get("errors", [])
+            })
+        
+    except concurrent.futures.TimeoutError:
+        return jsonify({
+            "success": False,
+            "error": "Timeout: A conversão excedeu o tempo limite de 2 horas"
+        })
+    except Exception as e:
+        print(f"Erro na conversão: {str(e)}")
+        
+        try:
+            conversions = load_conversions()
+            conversions['stats']['total'] = conversions['stats'].get('total', 0) + 1
+            conversions['stats']['failed'] = conversions['stats'].get('failed', 0) + 1
+            save_conversions(conversions)
+        except:
+            pass
+        
+        return jsonify({
+            "success": False,
+            "error": f"Erro interno: {str(e)}"
+        })
+
+# =============== ROTAS PARA SERVIDOR DE ARQUIVOS HLS ===============
+
+@app.route('/hls/<playlist_id>/master.m3u8')
+@app.route('/hls/<playlist_id>/<quality>/index.m3u8')
+@app.route('/hls/<playlist_id>/<video_id>/<quality>/index.m3u8')
+@app.route('/hls/<playlist_id>/<path:filename>')
+def serve_hls(playlist_id, quality=None, video_id=None, filename=None):
+    """Servir arquivos HLS"""
+    if filename is None:
+        if quality and video_id:
+            # URL: /hls/playlist_id/video_id/quality/index.m3u8
+            filepath = os.path.join(HLS_DIR, playlist_id, video_id, quality, "index.m3u8")
+        elif quality and not video_id:
+            # URL: /hls/playlist_id/quality/index.m3u8
+            filepath = os.path.join(HLS_DIR, playlist_id, quality, "index.m3u8")
+        else:
+            # URL: /hls/playlist_id/master.m3u8
+            filepath = os.path.join(HLS_DIR, playlist_id, "master.m3u8")
     else:
-        return send_file(filepath, mimetype='video/mp4')
+        # URL: /hls/playlist_id/.../arquivo.ts ou outro arquivo
+        filepath = os.path.join(HLS_DIR, playlist_id, filename)
+    
+    if os.path.exists(filepath):
+        return send_file(filepath)
+    
+    # Buscar em subdiretórios
+    for root, dirs, files in os.walk(os.path.join(HLS_DIR, playlist_id)):
+        if filename and filename in files:
+            return send_file(os.path.join(root, filename))
+    
+    return "Arquivo não encontrado", 404
+
+@app.route('/player/<playlist_id>')
+def player_page(playlist_id):
+    """Página do player para playlist"""
+    m3u8_url = f"/hls/{playlist_id}/master.m3u8"
+    
+    index_file = os.path.join(HLS_DIR, playlist_id, "playlist_info.json")
+    video_info = []
+    conversion_name = playlist_id
+    
+    if os.path.exists(index_file):
+        try:
+            with open(index_file, 'r') as f:
+                data = json.load(f)
+                video_info = data.get('videos', [])
+                conversion_name = data.get('conversion_name', playlist_id)
+        except:
+            pass
+    
+    player_html = '''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>''' + conversion_name + ''' - HLS Player</title>
+        <link href="https://vjs.zencdn.net/7.20.3/video-js.css" rel="stylesheet">
+        <style>
+            body { 
+                margin: 0; 
+                padding: 20px; 
+                background: #1a1a1a; 
+                color: white;
+                font-family: Arial, sans-serif;
+            }
+            .player-container { 
+                max-width: 1200px; 
+                margin: 0 auto; 
+                background: #2d2d2d;
+                border-radius: 10px;
+                overflow: hidden;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            }
+            .back-btn { 
+                background: #4361ee; 
+                color: white; 
+                border: none; 
+                padding: 10px 20px; 
+                border-radius: 5px; 
+                cursor: pointer;
+                margin-bottom: 20px;
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .playlist-info {
+                padding: 20px;
+                background: #363636;
+                border-bottom: 1px solid #444;
+            }
+            .videos-list {
+                padding: 20px;
+                max-height: 300px;
+                overflow-y: auto;
+            }
+            .video-item {
+                padding: 10px 15px;
+                background: #2d2d2d;
+                border-radius: 5px;
+                margin-bottom: 10px;
+                border-left: 3px solid #4361ee;
+            }
+            .video-title {
+                font-weight: bold;
+                color: #4cc9f0;
+            }
+            .video-meta {
+                font-size: 0.9rem;
+                color: #aaa;
+                margin-top: 5px;
+            }
+        </style>
+    </head>
+    <body>
+        <button class="back-btn" onclick="window.history.back()">
+            <i class="fas fa-arrow-left"></i> Voltar
+        </button>
+        
+        <div class="player-container">
+            <div class="playlist-info">
+                <h2>🎬 ''' + conversion_name + '''</h2>
+                <p>Total de vídeos: ''' + str(len(video_info)) + ''' | Use as setas para navegar entre os vídeos</p>
+            </div>
+            
+            <video id="hlsPlayer" class="video-js vjs-default-skin" controls preload="auto" width="100%" height="500">
+                <source src="''' + m3u8_url + '''" type="application/x-mpegURL">
+            </video>
+    '''
+    
+    if video_info:
+        player_html += '''
+            <div class="videos-list">
+                <h3><i class="fas fa-list"></i> Vídeos na Playlist</h3>
+        '''
+        
+        for v in video_info:
+            qualities = ', '.join(v.get("qualities", []))
+            filename = v.get("filename", "Vídeo")
+            player_html += f'''
+                <div class="video-item">
+                    <div class="video-title">{filename}</div>
+                    <div class="video-meta">
+                        Qualidades: {qualities}
+                    </div>
+                </div>
+            '''
+        
+        player_html += '''
+            </div>
+        '''
+    
+    player_html += '''
+        </div>
+        
+        <script src="https://vjs.zencdn.net/7.20.3/video.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/videojs-contrib-hls/5.15.0/videojs-contrib-hls.min.js"></script>
+        <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
+        <script>
+            var player = videojs('hlsPlayer', {
+                html5: {
+                    hls: {
+                        enableLowInitialPlaylist: true,
+                        smoothQualityChange: true,
+                        overrideNative: true
+                    }
+                }
+            });
+            
+            player.ready(function() {
+                this.play();
+            });
+        </script>
+    </body>
+    </html>
+    '''
+    
+    return player_html
+
+@app.route('/health')
+def health():
+    """Health check endpoint"""
+    return jsonify({
+        "status": "healthy",
+        "service": "hls-converter-ultimate",
+        "timestamp": datetime.now().isoformat(),
+        "version": "3.0.0",
+        "ffmpeg": find_ffmpeg() is not None,
+        "multi_upload": True,
+        "backup_system": True,
+        "named_conversions": True,
+        "fixed_links": True,
+        "progress_tracking": True,
+        "internal_videos": True
+    })
 
 # =============== INICIALIZAÇÃO ===============
 if __name__ == '__main__':
@@ -2938,42 +4947,8 @@ if __name__ == '__main__':
     except ImportError:
         print("⚠️  Waitress não encontrado, usando servidor de desenvolvimento...")
         app.run(host='0.0.0.0', port=8080, debug=False, threaded=True)
-EOF
 
-# 10. CRIAR ARQUIVOS DE BANCO DE DADOS
-echo "💾 Criando arquivos de banco de dados..."
 
-cat > /opt/hls-converter/db/users.json << 'EOF'
-{
-    "users": {
-        "admin": {
-            "password": "$2b$12$7eE8R5Yq3X3t7kXq3Z8p9eBvG9HjK1L2N3M4Q5W6X7Y8Z9A0B1C2D3E4F5G6H7I8J9",
-            "password_changed": false,
-            "created_at": "2024-01-01T00:00:00",
-            "last_login": null,
-            "role": "admin"
-        }
-    },
-    "settings": {
-        "require_password_change": true,
-        "session_timeout": 7200,
-        "max_login_attempts": 5,
-        "max_concurrent_conversions": 1,
-        "keep_originals": true
-    }
-}
-EOF
-
-cat > /opt/hls-converter/db/conversions.json << 'EOF'
-{
-    "conversions": [],
-    "stats": {
-        "total": 0,
-        "success": 0,
-        "failed": 0
-    }
-}
-EOF
 
 # 11. CRIAR SCRIPT DE GERENCIAMENTO MELHORADO
 echo "📝 Criando script de gerenciamento melhorado..."
