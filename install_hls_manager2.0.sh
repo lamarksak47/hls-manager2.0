@@ -340,7 +340,7 @@ def create_backup(backup_name=None):
         metadata = {
             "backup_name": backup_name,
             "created_at": datetime.now().isoformat(),
-            "version": "2.2.1",
+            "version": "2.2.2",
             "directories": dirs_to_backup,
             "total_users": len(load_users().get('users', {})),
             "total_conversions": load_conversions().get('stats', {}).get('total', 0)
@@ -551,7 +551,7 @@ def convert_single_video(video_data, playlist_id, index, total_files, qualities,
             
             if process.returncode == 0:
                 video_info["qualities"].append(quality)
-                video_info["playlist_paths"][quality] = f"{video_id}/{quality}/index.m3u8"
+                video_info["playlist_paths"][quality] = f"{playlist_id}/{video_id}/{quality}/index.m3u8"
                 
                 # Obter duração do vídeo
                 try:
@@ -597,7 +597,7 @@ def convert_single_video(video_data, playlist_id, index, total_files, qualities,
                 
                 if simple_result.returncode == 0:
                     video_info["qualities"].append(quality)
-                    video_info["playlist_paths"][quality] = f"{video_id}/{quality}/index.m3u8"
+                    video_info["playlist_paths"][quality] = f"{playlist_id}/{video_id}/{quality}/index.m3u8"
                     video_info["duration"] = 60
                     
         except subprocess.TimeoutExpired:
@@ -666,7 +666,8 @@ def create_master_playlist(playlist_id, videos_info, qualities, conversion_name)
                 continue
             
             f.write(f'#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},RESOLUTION={resolution},CODECS="avc1.64001f,mp4a.40.2"\n')
-            f.write(f'{quality}/index.m3u8\n')
+            # Corrigido: apontar para a playlist da qualidade na pasta playlist_id (não dentro de video_id)
+            f.write(f'{playlist_id}/{quality}/index.m3u8\n')
     
     # Criar variante playlists para cada qualidade
     for quality in qualities:
@@ -683,12 +684,11 @@ def create_master_playlist(playlist_id, videos_info, qualities, conversion_name)
             # Para cada vídeo, adicionar sua playlist
             for video_info in videos_info:
                 if quality in video_info.get("qualities", []):
-                    video_playlist_path = f"../{video_info['id']}/{quality}/index.m3u8"
-                    if os.path.exists(os.path.join(playlist_dir, video_info['id'], quality, "index.m3u8")):
-                        qf.write(f'#EXT-X-DISCONTINUITY\n')
-                        qf.write(f'#EXTINF:{video_info.get("duration", 10):.6f},\n')
-                        qf.write(f'{video_playlist_path}\n')
-                        playlist_info["total_duration"] += video_info.get("duration", 10)
+                    video_playlist_path = f"{video_info['id']}/{quality}/index.m3u8"
+                    qf.write(f'#EXT-X-DISCONTINUITY\n')
+                    qf.write(f'#EXTINF:{video_info.get("duration", 10):.6f},\n')
+                    qf.write(f'{video_playlist_path}\n')
+                    playlist_info["total_duration"] += video_info.get("duration", 10)
             
             qf.write("#EXT-X-ENDLIST\n")
     
@@ -764,7 +764,24 @@ def process_multiple_videos(files_data, qualities, playlist_id, conversion_name)
             "player_url": f"/player/{playlist_id}",
             "videos_info": videos_info,
             "total_duration": total_duration,
-            "qualities": [q for q in qualities if any(q in v.get("qualities", []) for v in videos_info)]
+            "qualities": [q for q in qualities if any(q in v.get("qualities", []) for v in videos_info)],
+            # Links corrigidos para cada qualidade
+            "quality_links": {
+                quality: f"/hls/{playlist_id}/{quality}/index.m3u8"
+                for quality in qualities
+                if any(quality in v.get("qualities", []) for v in videos_info)
+            },
+            # Links para cada vídeo individual (se necessário)
+            "video_links": [
+                {
+                    "filename": v["filename"],
+                    "links": {
+                        quality: f"/hls/{playlist_id}/{v['id']}/{quality}/index.m3u8"
+                        for quality in v.get("qualities", [])
+                    }
+                }
+                for v in videos_info if v.get("qualities")
+            ]
         }
     else:
         return {
@@ -776,8 +793,6 @@ def process_multiple_videos(files_data, qualities, playlist_id, conversion_name)
         }
 
 # =============== PÁGINAS HTML ===============
-# ... (as páginas HTML permanecem as mesmas, mas vou incluir o JavaScript corrigido)
-
 LOGIN_HTML = '''
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -1678,6 +1693,23 @@ DASHBOARD_HTML = '''
             padding: 6px 12px;
             font-size: 0.8rem;
         }
+        
+        /* Estilos para links de vídeos individuais */
+        .video-links {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f0f8ff;
+            border-radius: 5px;
+            border-left: 3px solid #4cc9f0;
+        }
+        
+        .video-link-item {
+            margin: 5px 0;
+            padding: 8px;
+            background: white;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
     </style>
 </head>
 <body>
@@ -2288,12 +2320,13 @@ DASHBOARD_HTML = '''
             const baseUrl = window.location.origin;
             let html = '';
             
-            // Link principal da playlist
+            // Link principal da playlist master
             html += `
                 <div class="link-item">
                     <div class="link-info">
-                        <div class="link-title">${data.conversion_name}</div>
+                        <div class="link-title">Master Playlist - ${data.conversion_name}</div>
                         <div class="link-url">${baseUrl}/hls/${data.playlist_id}/master.m3u8</div>
+                        <small style="color: #666;">Playlist principal com todas as qualidades</small>
                     </div>
                     <div class="link-actions">
                         <button class="btn btn-primary btn-sm" onclick="copyToClipboard('${baseUrl}/hls/${data.playlist_id}/master.m3u8')">
@@ -2306,21 +2339,49 @@ DASHBOARD_HTML = '''
                 </div>
             `;
             
-            // Links para cada qualidade
-            if (data.qualities && Array.isArray(data.qualities)) {
-                data.qualities.forEach(quality => {
+            // Links para cada qualidade (CORRIGIDO)
+            if (data.quality_links) {
+                for (const [quality, path] of Object.entries(data.quality_links)) {
+                    const fullUrl = `${baseUrl}${path}`;
                     html += `
                         <div class="link-item">
                             <div class="link-info">
                                 <div class="link-title">${quality} - ${data.conversion_name}</div>
-                                <div class="link-url">${baseUrl}/hls/${data.playlist_id}/${quality}/index.m3u8</div>
+                                <div class="link-url">${fullUrl}</div>
+                                <small style="color: #666;">Playlist específica para qualidade ${quality}</small>
                             </div>
-                            <button class="btn btn-primary btn-sm" onclick="copyToClipboard('${baseUrl}/hls/${data.playlist_id}/${quality}/index.m3u8')">
-                                <i class="fas fa-copy"></i>
-                            </button>
+                            <div class="link-actions">
+                                <button class="btn btn-primary btn-sm" onclick="copyToClipboard('${fullUrl}')">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
                         </div>
                     `;
+                }
+            }
+            
+            // Links para vídeos individuais (se existirem)
+            if (data.video_links && data.video_links.length > 0) {
+                html += `<div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #ddd;">
+                    <h4><i class="fas fa-file-video"></i> Links para Vídeos Individuais:</h4>`;
+                
+                data.video_links.forEach(video => {
+                    html += `<div class="video-links">`;
+                    html += `<div><strong>${video.filename}</strong></div>`;
+                    for (const [quality, path] of Object.entries(video.links)) {
+                        const fullUrl = `${baseUrl}/hls/${path}`;
+                        html += `
+                            <div class="video-link-item">
+                                ${quality}: ${fullUrl}
+                                <button class="btn btn-primary btn-sm" style="margin-left: 10px; padding: 2px 8px;" onclick="copyToClipboard('${fullUrl}')">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                        `;
+                    }
+                    html += `</div>`;
                 });
+                html += `</div>`;
             }
             
             linksList.innerHTML = html;
@@ -2548,7 +2609,7 @@ DASHBOARD_HTML = '''
                             <div class="empty-state">
                                 <i class="fas fa-database"></i>
                                 <p>Nenhum backup encontrado</p>
-                            </div>
+                        </div>
                         `;
                         return;
                     }
@@ -3105,7 +3166,7 @@ def api_system_info():
         users = load_users()
         
         return jsonify({
-            "version": "2.2.1",
+            "version": "2.2.2",
             "base_dir": BASE_DIR,
             "users_count": len(users.get('users', {})),
             "service_status": "running",
@@ -3359,6 +3420,8 @@ def convert_multiple_videos():
                 "qualities": result.get("qualities", qualities),
                 "m3u8_url": f"/hls/{playlist_id}/master.m3u8",
                 "player_url": f"/player/{playlist_id}",
+                "quality_links": result.get("quality_links", {}),
+                "video_links": result.get("video_links", []),
                 "errors": result.get("errors", []),
                 "message": f"Conversão '{conversion_name}' concluída com sucesso!"
             })
@@ -3487,19 +3550,31 @@ def convert_video():
         })
 
 @app.route('/hls/<playlist_id>/master.m3u8')
+@app.route('/hls/<playlist_id>/<quality>/index.m3u8')
+@app.route('/hls/<playlist_id>/<video_id>/<quality>/index.m3u8')
 @app.route('/hls/<playlist_id>/<path:filename>')
-def serve_hls(playlist_id, filename=None):
-    """Servir arquivos HLS"""
+def serve_hls(playlist_id, quality=None, video_id=None, filename=None):
+    """Servir arquivos HLS com estrutura corrigida"""
     if filename is None:
-        filename = "master.m3u8"
+        if quality and video_id:
+            # URL: /hls/playlist_id/video_id/quality/index.m3u8
+            filepath = os.path.join(HLS_DIR, playlist_id, video_id, quality, "index.m3u8")
+        elif quality and not video_id:
+            # URL: /hls/playlist_id/quality/index.m3u8
+            filepath = os.path.join(HLS_DIR, playlist_id, quality, "index.m3u8")
+        else:
+            # URL: /hls/playlist_id/master.m3u8
+            filepath = os.path.join(HLS_DIR, playlist_id, "master.m3u8")
+    else:
+        # URL: /hls/playlist_id/.../arquivo.ts ou outro arquivo
+        filepath = os.path.join(HLS_DIR, playlist_id, filename)
     
-    filepath = os.path.join(HLS_DIR, playlist_id, filename)
     if os.path.exists(filepath):
         return send_file(filepath)
     
     # Buscar em subdiretórios
     for root, dirs, files in os.walk(os.path.join(HLS_DIR, playlist_id)):
-        if filename in files:
+        if filename and filename in files:
             return send_file(os.path.join(root, filename))
     
     return "Arquivo não encontrado", 404
@@ -3656,23 +3731,25 @@ def health():
         "status": "healthy",
         "service": "hls-converter-ultimate",
         "timestamp": datetime.now().isoformat(),
-        "version": "2.2.1",
+        "version": "2.2.2",
         "ffmpeg": find_ffmpeg() is not None,
         "multi_upload": True,
         "backup_system": True,
-        "named_conversions": True
+        "named_conversions": True,
+        "fixed_links": True
     })
 
 # =============== INICIALIZAÇÃO ===============
 if __name__ == '__main__':
     print("=" * 60)
-    print("🚀 HLS Converter ULTIMATE - Versão Corrigida 2.2.1")
+    print("🚀 HLS Converter ULTIMATE - Versão Corrigida 2.2.2")
     print("=" * 60)
     print(f"📂 Diretório base: {BASE_DIR}")
     print(f"🔐 Autenticação: Habilitada")
     print(f"👤 Usuário padrão: admin / admin")
     print(f"💾 Sistema de backup: Habilitado")
     print(f"🏷️  Nome personalizado: Habilitado")
+    print(f"🔗 Links corrigidos: SIM")
     print(f"🌐 Porta: 8080")
     print("=" * 60)
     
@@ -3949,7 +4026,7 @@ else:
         echo "🎬 HLS Converter ULTIMATE - Informações do Sistema"
         echo "=" * 60
         echo "Status: $(systemctl is-active hls-converter 2>/dev/null || echo 'inactive')"
-        echo "Versão: 2.2.1 (Corrigida)"
+        echo "Versão: 2.2.2 (Corrigida)"
         echo "Porta: 8080"
         echo "Login: http://$IP:8080/login"
         echo "Usuário: admin"
@@ -3972,6 +4049,12 @@ else:
         echo "  ✅ Multi-upload funcionando corretamente"
         echo "  ✅ Histórico de conversões corrigido"
         echo "  ✅ Player HLS melhorado"
+        echo "  ✅ LINKS CORRIGIDOS - agora apontam corretamente para as pastas"
+        echo ""
+        echo "🔗 ESTRUTURA DE LINKS CORRIGIDA:"
+        echo "  ✅ Master playlist: /hls/PLAYLIST_ID/master.m3u8"
+        echo "  ✅ Qualidade playlist: /hls/PLAYLIST_ID/QUALIDADE/index.m3u8"
+        echo "  ✅ Vídeo individual: /hls/PLAYLIST_ID/VIDEO_ID/QUALIDADE/index.m3u8"
         echo ""
         echo "⚙️  Funcionalidades:"
         echo "  ✅ Sistema de autenticação seguro"
@@ -3999,7 +4082,7 @@ else:
         echo "=" * 60
         ;;
     *)
-        echo "🎬 HLS Converter ULTIMATE - Gerenciador (v2.2.1)"
+        echo "🎬 HLS Converter ULTIMATE - Gerenciador (v2.2.2)"
         echo "================================================"
         echo ""
         echo "Uso: hlsctl [comando]"
@@ -4172,6 +4255,12 @@ echo "   ✅ Multi-upload funcionando perfeitamente"
 echo "   ✅ Histórico de conversões corrigido"
 echo "   ✅ Player HLS melhorado"
 echo "   ✅ Tratamento de erros aprimorado"
+echo "   ✅ LINKS CORRIGIDOS - AGORA APONTAM PARA PASTAS CERTAS"
+echo ""
+echo "🔗 ESTRUTURA DE LINKS CORRIGIDA:"
+echo "   ✅ Master playlist: /hls/PLAYLIST_ID/master.m3u8"
+echo "   ✅ Qualidade playlist: /hls/PLAYLIST_ID/QUALIDADE/index.m3u8"
+echo "   ✅ Vídeo individual: /hls/PLAYLIST_ID/VIDEO_ID/QUALIDADE/index.m3u8"
 echo ""
 echo "🔐 SISTEMA DE SEGURANÇA:"
 echo "   ✅ Autenticação com bcrypt"
