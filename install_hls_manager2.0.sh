@@ -151,8 +151,8 @@ echo "💻 Criando aplicação Flask corrigida..."
 cat > /opt/hls-converter/app.py << 'EOF'
 #!/usr/bin/env python3
 """
-HLS Converter ULTIMATE - Versão Multiarquivos
-Sistema completo com opção para arquivos externos e internos
+HLS Converter ULTIMATE - Versão Corrigida
+Sistema completo com autenticação, histórico, backup e nome personalizado
 """
 
 import os
@@ -167,7 +167,7 @@ import tarfile
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
-from flask import Flask, request, jsonify, render_template_string, send_file, redirect, url_for, session, flash, Response
+from flask import Flask, request, jsonify, render_template_string, send_file, redirect, url_for, session, flash
 from flask_cors import CORS
 import bcrypt
 import secrets
@@ -187,7 +187,7 @@ app.config['SESSION_FILE_DIR'] = '/opt/hls-converter/sessions'
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=2)
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SECURE'] = False
-app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024 * 1024  # 2GB max upload
+app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024 * 1024  # 10GB max upload
 
 # Diretórios
 BASE_DIR = "/opt/hls-converter"
@@ -197,20 +197,16 @@ LOG_DIR = os.path.join(BASE_DIR, "logs")
 DB_DIR = os.path.join(BASE_DIR, "db")
 BACKUP_DIR = os.path.join(BASE_DIR, "backups")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-INTERNAL_VIDEOS_DIR = os.path.join(BASE_DIR, "videos_internos")
 USERS_FILE = os.path.join(DB_DIR, "users.json")
 CONVERSIONS_FILE = os.path.join(DB_DIR, "conversions.json")
 
 # Criar diretórios
-for dir_path in [UPLOAD_DIR, HLS_DIR, LOG_DIR, DB_DIR, BACKUP_DIR, STATIC_DIR, INTERNAL_VIDEOS_DIR, app.config['SESSION_FILE_DIR']]:
+for dir_path in [UPLOAD_DIR, HLS_DIR, LOG_DIR, DB_DIR, BACKUP_DIR, STATIC_DIR, app.config['SESSION_FILE_DIR']]:
     os.makedirs(dir_path, exist_ok=True)
 
 # Fila para processamento em sequência
 processing_queue = Queue()
-executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
-
-# Variável global para progresso
-conversion_progress = {}
+executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
 # =============== FUNÇÕES AUXILIARES ===============
 def load_users():
@@ -336,9 +332,12 @@ def log_activity(message):
 
 def sanitize_filename(filename):
     """Remove caracteres inválidos do nome do arquivo"""
+    # Mantém apenas caracteres seguros
     safe_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_ ."
     filename = ''.join(c for c in filename if c in safe_chars)
+    # Remove múltiplos espaços
     filename = ' '.join(filename.split())
+    # Limita tamanho
     if len(filename) > 100:
         name, ext = os.path.splitext(filename)
         filename = name[:95] + ext
@@ -353,16 +352,18 @@ def create_backup(backup_name=None):
         
         backup_path = os.path.join(BACKUP_DIR, f"{backup_name}.tar.gz")
         
+        # Lista de diretórios para backup
         dirs_to_backup = [
             DB_DIR,
             os.path.join(BASE_DIR, "app.py"),
             os.path.join(LOG_DIR, "activity.log")
         ]
         
+        # Criar arquivo de metadados
         metadata = {
             "backup_name": backup_name,
             "created_at": datetime.now().isoformat(),
-            "version": "2.5.0",
+            "version": "2.3.0",
             "directories": dirs_to_backup,
             "total_users": len(load_users().get('users', {})),
             "total_conversions": load_conversions().get('stats', {}).get('total', 0)
@@ -374,6 +375,7 @@ def create_backup(backup_name=None):
         
         dirs_to_backup.append(metadata_file)
         
+        # Criar arquivo tar.gz
         with tarfile.open(backup_path, "w:gz") as tar:
             for item in dirs_to_backup:
                 if os.path.exists(item):
@@ -386,8 +388,10 @@ def create_backup(backup_name=None):
                                 arcname = os.path.relpath(filepath, BASE_DIR)
                                 tar.add(filepath, arcname=arcname)
         
+        # Remover arquivo de metadados temporário
         os.remove(metadata_file)
         
+        # Calcular tamanho
         size = os.path.getsize(backup_path)
         
         return {
@@ -407,17 +411,20 @@ def create_backup(backup_name=None):
 def restore_backup(backup_file):
     """Restaura o sistema a partir de um backup"""
     try:
+        # Extrair backup
         extract_dir = tempfile.mkdtemp(prefix="hls_restore_")
         
         with tarfile.open(backup_file, "r:gz") as tar:
             tar.extractall(path=extract_dir)
         
+        # Verificar metadados
         metadata_files = [f for f in os.listdir(extract_dir) if f.endswith('_metadata.json')]
         if metadata_files:
             metadata_file = os.path.join(extract_dir, metadata_files[0])
             with open(metadata_file, 'r') as f:
                 metadata = json.load(f)
         
+        # Restaurar arquivos
         for root, dirs, files in os.walk(extract_dir):
             for file in files:
                 if file.endswith('_metadata.json'):
@@ -426,6 +433,7 @@ def restore_backup(backup_file):
                 src_path = os.path.join(root, file)
                 rel_path = os.path.relpath(src_path, extract_dir)
                 
+                # Determinar destino
                 if rel_path.startswith("db/"):
                     dst_path = os.path.join(DB_DIR, os.path.basename(file))
                 elif rel_path == "app.py":
@@ -435,9 +443,11 @@ def restore_backup(backup_file):
                 else:
                     dst_path = os.path.join(BASE_DIR, rel_path)
                 
+                # Copiar arquivo
                 os.makedirs(os.path.dirname(dst_path), exist_ok=True)
                 shutil.copy2(src_path, dst_path)
         
+        # Limpar diretório temporário
         shutil.rmtree(extract_dir)
         
         return {
@@ -468,6 +478,7 @@ def list_backups():
                     "modified": datetime.fromtimestamp(stat.st_mtime).isoformat()
                 })
         
+        # Ordenar por data (mais recente primeiro)
         backups.sort(key=lambda x: x['modified'], reverse=True)
         
     except Exception as e:
@@ -475,71 +486,28 @@ def list_backups():
     
     return backups
 
-def update_progress(playlist_id, file_index, total_files, message="", filename=""):
-    """Atualiza o progresso da conversão"""
-    progress = {
-        "playlist_id": playlist_id,
-        "file_index": file_index,
-        "total_files": total_files,
-        "progress_percent": int((file_index / total_files) * 100) if total_files > 0 else 0,
-        "message": message,
-        "filename": filename,
-        "timestamp": datetime.now().isoformat()
-    }
-    conversion_progress[playlist_id] = progress
-    return progress
-
-def get_progress(playlist_id):
-    """Obtém o progresso atual"""
-    return conversion_progress.get(playlist_id, {
-        "progress_percent": 0,
-        "message": "Aguardando início",
-        "filename": ""
-    })
-
-def list_internal_videos():
-    """Lista vídeos disponíveis no diretório interno"""
-    video_files = []
-    
-    try:
-        for file in os.listdir(INTERNAL_VIDEOS_DIR):
-            file_path = os.path.join(INTERNAL_VIDEOS_DIR, file)
-            if os.path.isfile(file_path):
-                video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv', '.m4v', '.mpeg', '.mpg']
-                if any(file.lower().endswith(ext) for ext in video_extensions):
-                    stat = os.stat(file_path)
-                    video_files.append({
-                        "name": file,
-                        "path": file_path,
-                        "size": stat.st_size,
-                        "modified": datetime.fromtimestamp(stat.st_mtime).isoformat()
-                    })
-        
-        video_files.sort(key=lambda x: x['name'])
-        
-    except Exception as e:
-        print(f"Erro ao listar vídeos internos: {e}")
-    
-    return video_files
-
-# =============== FUNÇÕES DE CONVERSÃO MULTIARQUIVOS ===============
-def convert_single_video(video_path, playlist_id, index, total_files, qualities, progress_callback=None):
+# =============== FUNÇÕES DE CONVERSÃO CORRIGIDAS ===============
+def convert_single_video(video_data, playlist_id, index, total_files, qualities, callback=None):
     """
-    Converte um único vídeo para HLS - versão multiarquivos
+    Converte um único vídeo para HLS - VERSÃO CORRIGIDA
     """
     ffmpeg_path = find_ffmpeg()
     if not ffmpeg_path:
         return None, "FFmpeg não encontrado"
     
-    filename = os.path.basename(video_path)
+    file, filename = video_data
     video_id = f"{playlist_id}_{index:03d}"
     output_dir = os.path.join(HLS_DIR, playlist_id, video_id)
     os.makedirs(output_dir, exist_ok=True)
     
+    # Salvar arquivo original
+    original_path = os.path.join(output_dir, "original.mp4")
+    file.save(original_path)
+    
+    # Converter para cada qualidade
     video_info = {
         "id": video_id,
         "filename": filename,
-        "original_path": video_path,
         "qualities": [],
         "duration": 0,
         "playlist_paths": {}
@@ -551,6 +519,7 @@ def convert_single_video(video_path, playlist_id, index, total_files, qualities,
         
         m3u8_file = os.path.join(quality_dir, "index.m3u8")
         
+        # Configurações por qualidade
         if quality == '240p':
             scale = "426:240"
             bitrate = "400k"
@@ -574,8 +543,9 @@ def convert_single_video(video_path, playlist_id, index, total_files, qualities,
         else:
             continue
         
+        # Comando FFmpeg CORRIGIDO
         cmd = [
-            ffmpeg_path, '-i', video_path,
+            ffmpeg_path, '-i', original_path,
             '-vf', f'scale={scale},format=yuv420p',
             '-c:v', 'libx264', 
             '-preset', 'medium',
@@ -589,29 +559,26 @@ def convert_single_video(video_path, playlist_id, index, total_files, qualities,
             '-hls_segment_filename', os.path.join(quality_dir, 'segment_%03d.ts'),
             '-f', 'hls', 
             '-hls_flags', 'independent_segments',
-            '-threads', '2',
-            '-y',
             m3u8_file
         ]
         
+        # Executar conversão
         try:
-            if progress_callback:
-                progress_callback(f"Convertendo {filename} para {quality}...")
-            
             process = subprocess.Popen(
                 cmd, 
                 stdout=subprocess.PIPE, 
                 stderr=subprocess.PIPE,
                 universal_newlines=True
             )
-            stdout, stderr = process.communicate(timeout=1200)
+            stdout, stderr = process.communicate(timeout=600)
             
             if process.returncode == 0:
                 video_info["qualities"].append(quality)
                 video_info["playlist_paths"][quality] = f"{playlist_id}/{video_id}/{quality}/index.m3u8"
                 
+                # Obter duração do vídeo
                 try:
-                    duration_cmd = [ffmpeg_path, '-i', video_path]
+                    duration_cmd = [ffmpeg_path, '-i', original_path]
                     duration_result = subprocess.run(
                         duration_cmd, 
                         capture_output=True, 
@@ -627,34 +594,28 @@ def convert_single_video(video_path, playlist_id, index, total_files, qualities,
                             break
                 except Exception as e:
                     print(f"Erro ao obter duração: {e}")
-                    video_info["duration"] = 60
+                    video_info["duration"] = 60  # Valor padrão
                     
             else:
                 error_msg = stderr[:500] if stderr else stdout[:500]
                 print(f"Erro FFmpeg para {quality}: {error_msg}")
-                
-                if progress_callback:
-                    progress_callback(f"Tentando conversão alternativa para {quality}...")
-                
+                # Tenta converter com configuração mais simples
                 simple_cmd = [
-                    ffmpeg_path, '-i', video_path,
+                    ffmpeg_path, '-i', original_path,
                     '-vf', f'scale={scale}',
                     '-c:v', 'libx264', '-preset', 'fast',
                     '-c:a', 'aac', '-b:a', audio_bitrate,
                     '-hls_time', '6',
                     '-hls_list_size', '0',
                     '-hls_segment_filename', os.path.join(quality_dir, 'segment_%03d.ts'),
-                    '-f', 'hls', 
-                    '-threads', '2',
-                    '-y',
-                    m3u8_file
+                    '-f', 'hls', m3u8_file
                 ]
                 
                 simple_result = subprocess.run(
                     simple_cmd,
                     capture_output=True,
                     text=True,
-                    timeout=1200
+                    timeout=600
                 )
                 
                 if simple_result.returncode == 0:
@@ -664,41 +625,122 @@ def convert_single_video(video_path, playlist_id, index, total_files, qualities,
                     
         except subprocess.TimeoutExpired:
             print(f"Timeout na conversão para {quality}")
-            process.kill()
-            return None, f"Timeout na conversão de {filename} para {quality}"
         except Exception as e:
             print(f"Erro geral na conversão {quality}: {str(e)}")
-            return None, f"Erro na conversão de {filename}: {str(e)}"
+    
+    # Mover arquivo original para subpasta original
+    original_dir = os.path.join(output_dir, "original")
+    os.makedirs(original_dir, exist_ok=True)
+    try:
+        if os.path.exists(original_path):
+            shutil.move(original_path, os.path.join(original_dir, filename))
+    except Exception as e:
+        print(f"Erro ao mover arquivo original: {e}")
     
     return video_info, None
 
-def process_multiple_videos(video_paths, qualities, playlist_id, conversion_name, files_data=None):
+def create_master_playlist(playlist_id, videos_info, qualities, conversion_name):
     """
-    Processa múltiplos vídeos em sequência - VERSÃO MULTIARQUIVOS
+    Cria um master playlist M3U8 - VERSÃO CORRIGIDA
+    """
+    playlist_dir = os.path.join(HLS_DIR, playlist_id)
+    master_playlist = os.path.join(playlist_dir, "master.m3u8")
+    
+    # Criar arquivo de informação da playlist
+    playlist_info = {
+        "playlist_id": playlist_id,
+        "conversion_name": conversion_name,
+        "created_at": datetime.now().isoformat(),
+        "videos_count": len(videos_info),
+        "total_duration": 0,
+        "videos": videos_info
+    }
+    
+    with open(master_playlist, 'w') as f:
+        f.write("#EXTM3U\n")
+        f.write("#EXT-X-VERSION:6\n")
+        
+        # Para cada qualidade, criar uma variante playlist
+        for quality in qualities:
+            # Verificar se há pelo menos um vídeo com esta qualidade
+            has_quality = False
+            for video in videos_info:
+                if quality in video.get("qualities", []):
+                    has_quality = True
+                    break
+            
+            if not has_quality:
+                continue
+            
+            # Configurações por qualidade
+            if quality == '240p':
+                bandwidth = "400000"
+                resolution = "426x240"
+            elif quality == '480p':
+                bandwidth = "800000"
+                resolution = "854x480"
+            elif quality == '720p':
+                bandwidth = "1500000"
+                resolution = "1280x720"
+            elif quality == '1080p':
+                bandwidth = "3000000"
+                resolution = "1920x1080"
+            else:
+                continue
+            
+            f.write(f'#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},RESOLUTION={resolution},CODECS="avc1.64001f,mp4a.40.2"\n')
+            # Corrigido: apontar para a playlist da qualidade na pasta playlist_id (não dentro de video_id)
+            f.write(f'{playlist_id}/{quality}/index.m3u8\n')
+    
+    # Criar variante playlists para cada qualidade
+    for quality in qualities:
+        quality_playlist_path = os.path.join(playlist_dir, quality, "index.m3u8")
+        os.makedirs(os.path.dirname(quality_playlist_path), exist_ok=True)
+        
+        with open(quality_playlist_path, 'w') as qf:
+            qf.write("#EXTM3U\n")
+            qf.write("#EXT-X-VERSION:6\n")
+            qf.write("#EXT-X-TARGETDURATION:10\n")
+            qf.write("#EXT-X-MEDIA-SEQUENCE:0\n")
+            qf.write("#EXT-X-PLAYLIST-TYPE:VOD\n")
+            
+            # Para cada vídeo, adicionar sua playlist
+            for video_info in videos_info:
+                if quality in video_info.get("qualities", []):
+                    video_playlist_path = f"{video_info['id']}/{quality}/index.m3u8"
+                    qf.write(f'#EXT-X-DISCONTINUITY\n')
+                    qf.write(f'#EXTINF:{video_info.get("duration", 10):.6f},\n')
+                    qf.write(f'{video_playlist_path}\n')
+                    playlist_info["total_duration"] += video_info.get("duration", 10)
+            
+            qf.write("#EXT-X-ENDLIST\n")
+    
+    # Salvar informações da playlist
+    info_file = os.path.join(playlist_dir, "playlist_info.json")
+    with open(info_file, 'w') as f:
+        json.dump(playlist_info, f, indent=2)
+    
+    return master_playlist, playlist_info["total_duration"]
+
+def process_multiple_videos(files_data, qualities, playlist_id, conversion_name):
+    """
+    Processa múltiplos vídeos em sequência - VERSÃO CORRIGIDA
     """
     videos_info = []
     errors = []
     
-    total_files = len(video_paths)
+    total_files = len(files_data)
     
-    for index, video_path in enumerate(video_paths, 1):
-        print(f"Processando arquivo {index}/{total_files}: {video_path}")
+    for index, (file, filename) in enumerate(files_data, 1):
+        print(f"Processando arquivo {index}/{total_files}: {filename}")
         
         try:
-            filename = os.path.basename(video_path)
-            
-            update_progress(playlist_id, index - 1, total_files, f"Convertendo: {filename}", filename)
-            
-            def progress_callback(message):
-                update_progress(playlist_id, index - 1, total_files, message, filename)
-            
             video_info, error = convert_single_video(
-                video_path, 
+                (file, filename), 
                 playlist_id, 
                 index, 
                 total_files, 
-                qualities,
-                progress_callback
+                qualities
             )
             
             if error:
@@ -710,33 +752,29 @@ def process_multiple_videos(video_paths, qualities, playlist_id, conversion_name
                     "error": error,
                     "duration": 60
                 }
-            else:
-                update_progress(playlist_id, index, total_files, f"Concluído: {filename}", filename)
             
             videos_info.append(video_info)
             print(f"Concluído: {filename} ({index}/{total_files})")
                 
         except Exception as e:
-            error_msg = f"Erro ao processar {os.path.basename(video_path)}: {str(e)}"
+            error_msg = f"Erro ao processar {filename}: {str(e)}"
             print(error_msg)
             errors.append(error_msg)
             
+            # Adicionar vídeo vazio para manter a ordem
             videos_info.append({
                 "id": f"{playlist_id}_{index:03d}",
-                "filename": os.path.basename(video_path),
+                "filename": filename,
                 "qualities": [],
                 "error": error_msg,
                 "duration": 60
             })
     
-    update_progress(playlist_id, total_files, total_files, "Criando playlists...", "")
-    
+    # Criar master playlist se houver vídeos com qualidade
     videos_with_qualities = [v for v in videos_info if v.get("qualities")]
     
     if videos_with_qualities:
         master_playlist, total_duration = create_master_playlist(playlist_id, videos_info, qualities, conversion_name)
-        
-        update_progress(playlist_id, total_files, total_files, "Conversão completa!", "")
         
         return {
             "success": True,
@@ -750,11 +788,13 @@ def process_multiple_videos(video_paths, qualities, playlist_id, conversion_name
             "videos_info": videos_info,
             "total_duration": total_duration,
             "qualities": [q for q in qualities if any(q in v.get("qualities", []) for v in videos_info)],
+            # Links corrigidos para cada qualidade
             "quality_links": {
                 quality: f"/hls/{playlist_id}/{quality}/index.m3u8"
                 for quality in qualities
                 if any(quality in v.get("qualities", []) for v in videos_info)
             },
+            # Links para cada vídeo individual (se necessário)
             "video_links": [
                 {
                     "filename": v["filename"],
@@ -775,83 +815,7 @@ def process_multiple_videos(video_paths, qualities, playlist_id, conversion_name
             "videos_info": videos_info
         }
 
-def create_master_playlist(playlist_id, videos_info, qualities, conversion_name):
-    """
-    Cria um master playlist M3U8 - VERSÃO MULTIARQUIVOS
-    """
-    playlist_dir = os.path.join(HLS_DIR, playlist_id)
-    master_playlist = os.path.join(playlist_dir, "master.m3u8")
-    
-    playlist_info = {
-        "playlist_id": playlist_id,
-        "conversion_name": conversion_name,
-        "created_at": datetime.now().isoformat(),
-        "videos_count": len(videos_info),
-        "total_duration": 0,
-        "videos": videos_info
-    }
-    
-    with open(master_playlist, 'w') as f:
-        f.write("#EXTM3U\n")
-        f.write("#EXT-X-VERSION:6\n")
-        
-        for quality in qualities:
-            has_quality = False
-            for video in videos_info:
-                if quality in video.get("qualities", []):
-                    has_quality = True
-                    break
-            
-            if not has_quality:
-                continue
-            
-            if quality == '240p':
-                bandwidth = "400000"
-                resolution = "426x240"
-            elif quality == '480p':
-                bandwidth = "800000"
-                resolution = "854x480"
-            elif quality == '720p':
-                bandwidth = "1500000"
-                resolution = "1280x720"
-            elif quality == '1080p':
-                bandwidth = "3000000"
-                resolution = "1920x1080"
-            else:
-                continue
-            
-            f.write(f'#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},RESOLUTION={resolution},CODECS="avc1.64001f,mp4a.40.2"\n')
-            f.write(f'{quality}/index.m3u8\n')
-    
-    for quality in qualities:
-        quality_playlist_path = os.path.join(playlist_dir, quality, "index.m3u8")
-        os.makedirs(os.path.dirname(quality_playlist_path), exist_ok=True)
-        
-        with open(quality_playlist_path, 'w') as qf:
-            qf.write("#EXTM3U\n")
-            qf.write("#EXT-X-VERSION:6\n")
-            qf.write("#EXT-X-TARGETDURATION:10\n")
-            qf.write("#EXT-X-MEDIA-SEQUENCE:0\n")
-            qf.write("#EXT-X-PLAYLIST-TYPE:VOD\n")
-            
-            for video_info in videos_info:
-                if quality in video_info.get("qualities", []):
-                    video_playlist_path = f"{video_info['id']}/{quality}/index.m3u8"
-                    qf.write(f'#EXT-X-DISCONTINUITY\n')
-                    qf.write(f'#EXTINF:{video_info.get("duration", 10):.6f},\n')
-                    qf.write(f'{video_playlist_path}\n')
-                    playlist_info["total_duration"] += video_info.get("duration", 10)
-            
-            qf.write("#EXT-X-ENDLIST\n")
-    
-    info_file = os.path.join(playlist_dir, "playlist_info.json")
-    with open(info_file, 'w') as f:
-        json.dump(playlist_info, f, indent=2)
-    
-    return master_playlist, playlist_info["total_duration"]
-
-# =============== PÁGINAS HTML COM MULTIARQUIVOS E ARQUIVOS INTERNOS ===============
-
+# =============== PÁGINAS HTML ===============
 LOGIN_HTML = '''
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -1081,7 +1045,7 @@ DASHBOARD_HTML = '''
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🎬 HLS Converter ULTIMATE - MULTIARQUIVOS</title>
+    <title>🎬 HLS Converter ULTIMATE</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         :root {
@@ -1238,42 +1202,37 @@ DASHBOARD_HTML = '''
             gap: 10px;
         }
         
-        /* Tabs de upload */
-        .upload-tabs {
-            display: flex;
-            background: #f8f9fa;
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .stat-item {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 25px;
             border-radius: 10px;
-            padding: 5px;
-            margin-bottom: 20px;
-        }
-        
-        .upload-tab {
-            flex: 1;
-            padding: 15px;
             text-align: center;
-            cursor: pointer;
-            border-radius: 8px;
-            transition: all 0.3s;
-            font-weight: 500;
+            transition: transform 0.3s;
         }
         
-        .upload-tab:hover {
-            background: #e9ecef;
+        .stat-item:hover {
+            transform: translateY(-5px);
         }
         
-        .upload-tab.active {
-            background: var(--primary);
-            color: white;
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 5px;
         }
         
-        /* Conteúdo de upload */
-        .upload-content {
-            display: none;
-        }
-        
-        .upload-content.active {
-            display: block;
-            animation: fadeIn 0.5s ease;
+        .stat-label {
+            color: #6c757d;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
         
         .upload-area {
@@ -1297,6 +1256,11 @@ DASHBOARD_HTML = '''
             font-size: 4rem;
             color: var(--primary);
             margin-bottom: 20px;
+        }
+        
+        .upload-area h3 {
+            color: var(--dark);
+            margin-bottom: 10px;
         }
         
         .btn {
@@ -1336,6 +1300,80 @@ DASHBOARD_HTML = '''
         .btn-danger {
             background: linear-gradient(90deg, var(--danger) 0%, #c0392b 100%);
             color: white;
+        }
+        
+        .conversions-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .conversion-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            border-left: 4px solid var(--accent);
+            transition: transform 0.3s;
+        }
+        
+        .conversion-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.12);
+        }
+        
+        .conversion-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .conversion-id {
+            font-family: monospace;
+            background: var(--light);
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 0.9rem;
+        }
+        
+        .conversion-status {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .conversion-info {
+            margin: 10px 0;
+        }
+        
+        .conversion-info p {
+            margin: 5px 0;
+            font-size: 0.9rem;
+        }
+        
+        .conversion-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .conversion-actions .btn {
+            padding: 8px 15px;
+            font-size: 0.85rem;
+            flex: 1;
         }
         
         .progress-container {
@@ -1385,6 +1423,117 @@ DASHBOARD_HTML = '''
             border-color: var(--secondary);
         }
         
+        .file-info {
+            background: var(--light);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            display: none;
+        }
+        
+        .file-info.show {
+            display: block;
+            animation: fadeIn 0.5s ease;
+        }
+        
+        .ffmpeg-status {
+            display: inline-block;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-weight: 600;
+            margin: 10px 0;
+        }
+        
+        .ffmpeg-ok {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .ffmpeg-error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+        
+        .empty-state i {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            color: #dee2e6;
+        }
+        
+        .system-status {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 12px;
+            margin-top: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .header {
+                flex-direction: column;
+                gap: 15px;
+                text-align: center;
+            }
+            
+            .nav-tabs {
+                flex-wrap: wrap;
+            }
+            
+            .nav-tab {
+                flex: 1;
+                min-width: 120px;
+                justify-content: center;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .conversions-list {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: white;
+            padding: 15px 25px;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            z-index: 1000;
+            animation: slideIn 0.3s ease;
+            border-left: 4px solid var(--primary);
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        .toast.success {
+            border-left-color: var(--success);
+        }
+        
+        .toast.error {
+            border-left-color: var(--danger);
+        }
+        
+        .toast.warning {
+            border-left-color: var(--warning);
+        }
+        
+        /* Estilos para multi-upload */
         .selected-files {
             background: #f8f9fa;
             border-radius: 10px;
@@ -1437,6 +1586,24 @@ DASHBOARD_HTML = '''
             margin-left: 10px;
         }
         
+        .processing-details {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            display: none;
+        }
+        
+        .processing-details.show {
+            display: block;
+        }
+        
+        .current-file {
+            font-weight: 600;
+            color: var(--primary);
+        }
+        
+        /* Estilos para campo de nome */
         .conversion-name-input {
             width: 100%;
             padding: 15px;
@@ -1455,19 +1622,52 @@ DASHBOARD_HTML = '''
             background: white;
         }
         
-        .real-time-progress {
-            background: linear-gradient(135deg, #4361ee 0%, #3a0ca3 100%);
-            color: white;
+        /* Estilos para backup */
+        .backup-section {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
             padding: 20px;
             border-radius: 10px;
             margin-top: 20px;
-            display: none;
         }
         
-        .real-time-progress.show {
-            display: block;
+        .backup-list {
+            max-height: 300px;
+            overflow-y: auto;
+            margin: 15px 0;
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            border: 1px solid #ddd;
         }
         
+        .backup-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .backup-item:last-child {
+            border-bottom: none;
+        }
+        
+        .backup-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .btn-backup {
+            background: linear-gradient(90deg, #2ecc71 0%, #27ae60 100%);
+            color: white;
+        }
+        
+        .btn-restore {
+            background: linear-gradient(90deg, #3498db 0%, #2980b9 100%);
+            color: white;
+        }
+        
+        /* Estilos para links gerados */
         .links-container {
             background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
             padding: 20px;
@@ -1492,117 +1692,46 @@ DASHBOARD_HTML = '''
             border-left: 4px solid #4361ee;
         }
         
-        /* Estilos para vídeos internos */
-        .internal-videos-container {
-            max-height: 400px;
-            overflow-y: auto;
-            margin: 20px 0;
-            border: 1px solid #dee2e6;
-            border-radius: 8px;
-        }
-        
-        .internal-video-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 15px;
-            border-bottom: 1px solid #eaeaea;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        
-        .internal-video-item:hover {
-            background: #f8f9fa;
-        }
-        
-        .internal-video-item.selected {
-            background: #e3f2fd;
-            border-left: 4px solid #4361ee;
-        }
-        
-        .internal-video-info {
+        .link-info {
             flex: 1;
         }
         
-        .internal-video-name {
-            font-weight: 500;
+        .link-title {
+            font-weight: 600;
             color: #2c3e50;
         }
         
-        .internal-video-meta {
+        .link-url {
+            color: #666;
+            font-size: 0.9rem;
+            word-break: break-all;
+        }
+        
+        .link-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .btn-sm {
+            padding: 6px 12px;
             font-size: 0.8rem;
-            color: #6c757d;
         }
         
-        .internal-video-checkbox {
-            width: 20px;
-            height: 20px;
-            cursor: pointer;
+        /* Estilos para links de vídeos individuais */
+        .video-links {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f0f8ff;
+            border-radius: 5px;
+            border-left: 3px solid #4cc9f0;
         }
         
-        .video-selection-controls {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin: 15px 0;
-            padding: 15px;
-            background: #f8f9fa;
-            border-radius: 8px;
-        }
-        
-        @media (max-width: 768px) {
-            .header {
-                flex-direction: column;
-                gap: 15px;
-                text-align: center;
-            }
-            
-            .nav-tabs {
-                flex-wrap: wrap;
-            }
-            
-            .nav-tab {
-                flex: 1;
-                min-width: 120px;
-                justify-content: center;
-            }
-            
-            .upload-tabs {
-                flex-direction: column;
-            }
-        }
-        
-        .toast {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
+        .video-link-item {
+            margin: 5px 0;
+            padding: 8px;
             background: white;
-            padding: 15px 25px;
-            border-radius: 8px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            z-index: 1000;
-            animation: slideIn 0.3s ease;
-            border-left: 4px solid var(--primary);
-        }
-        
-        @keyframes slideIn {
-            from { transform: translateX(100%); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
-        }
-        
-        .toast.success {
-            border-left-color: var(--success);
-        }
-        
-        .toast.error {
-            border-left-color: var(--danger);
-        }
-        
-        .toast.warning {
-            border-left-color: var(--warning);
+            border-radius: 4px;
+            font-size: 0.85rem;
         }
     </style>
 </head>
@@ -1610,7 +1739,7 @@ DASHBOARD_HTML = '''
     <div class="header">
         <div class="logo">
             <i class="fas fa-video"></i>
-            <h1>HLS Converter ULTIMATE - MULTIARQUIVOS</h1>
+            <h1>HLS Converter ULTIMATE</h1>
         </div>
         <div class="user-info">
             <span><i class="fas fa-user"></i> {{ session.user_id }}</span>
@@ -1689,23 +1818,13 @@ DASHBOARD_HTML = '''
             </div>
         </div>
         
-        <!-- Upload Tab - COM DUAS OPÇÕES -->
+        <!-- Upload Tab - COM CAMPO DE NOME -->
         <div id="upload" class="tab-content">
             <div class="card">
                 <h2><i class="fas fa-upload"></i> Converter Múltiplos Vídeos para HLS</h2>
                 <p style="color: #666; margin-bottom: 20px;">
                     Selecione vários vídeos para converter em sequência. Todos os vídeos serão combinados em uma única playlist HLS.
                 </p>
-                
-                <!-- Tabs de seleção -->
-                <div class="upload-tabs">
-                    <div class="upload-tab active" onclick="showUploadTab('external')">
-                        <i class="fas fa-cloud-upload-alt"></i> Upload de Arquivos
-                    </div>
-                    <div class="upload-tab" onclick="showUploadTab('internal')">
-                        <i class="fas fa-folder-open"></i> Arquivos Internos
-                    </div>
-                </div>
                 
                 <!-- Campo de nome da conversão -->
                 <div style="margin-bottom: 20px;">
@@ -1721,59 +1840,22 @@ DASHBOARD_HTML = '''
                     </p>
                 </div>
                 
-                <!-- Conteúdo para upload externo -->
-                <div id="externalUpload" class="upload-content active">
-                    <div class="upload-area" onclick="document.getElementById('fileInput').click()">
-                        <i class="fas fa-cloud-upload-alt"></i>
-                        <h3>Arraste e solte seus vídeos aqui</h3>
-                        <p>ou clique para selecionar múltiplos arquivos (Ctrl + Click)</p>
-                        <p style="color: #666; margin-top: 10px;">
-                            Formatos suportados: MP4, AVI, MOV, MKV, WEBM - Até 2GB por arquivo
-                        </p>
-                    </div>
-                    
-                    <input type="file" id="fileInput" accept="video/*" multiple style="display: none;" onchange="handleExternalFileSelect()">
-                    
-                    <div id="selectedExternalFiles" class="selected-files" style="display: none;">
-                        <h4><i class="fas fa-file-video"></i> Arquivos Selecionados <span id="externalFileCount" class="upload-count">0</span></h4>
-                        <ul id="externalFileList" class="file-list"></ul>
-                    </div>
+                <div class="upload-area" onclick="document.getElementById('fileInput').click()">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                    <h3>Arraste e solte seus vídeos aqui</h3>
+                    <p>ou clique para selecionar múltiplos arquivos (Ctrl + Click)</p>
+                    <p style="color: #666; margin-top: 10px;">
+                        Formatos suportados: MP4, AVI, MOV, MKV, WEBM
+                    </p>
                 </div>
                 
-                <!-- Conteúdo para arquivos internos -->
-                <div id="internalUpload" class="upload-content">
-                    <div style="text-align: center; margin: 20px 0;">
-                        <i class="fas fa-folder-open" style="font-size: 3rem; color: #4361ee;"></i>
-                        <h3>Selecione vídeos do diretório interno</h3>
-                        <p>Vídeos disponíveis no diretório: <code>/opt/hls-converter/videos_internos/</code></p>
-                        <button class="btn btn-primary" onclick="loadInternalVideos()" style="margin-top: 15px;">
-                            <i class="fas fa-sync-alt"></i> Atualizar Lista
-                        </button>
-                    </div>
-                    
-                    <div id="internalVideosContainer" class="internal-videos-container">
-                        <div class="empty-state">
-                            <i class="fas fa-video"></i>
-                            <p>Carregando vídeos internos...</p>
-                        </div>
-                    </div>
-                    
-                    <div id="internalSelectionControls" class="video-selection-controls" style="display: none;">
-                        <div>
-                            <span id="internalSelectedCount">0</span> vídeos selecionados
-                        </div>
-                        <div>
-                            <button class="btn btn-sm btn-primary" onclick="selectAllInternalVideos()">
-                                <i class="fas fa-check-square"></i> Selecionar Todos
-                            </button>
-                            <button class="btn btn-sm btn-secondary" onclick="deselectAllInternalVideos()">
-                                <i class="fas fa-square"></i> Desmarcar Todos
-                            </button>
-                        </div>
-                    </div>
+                <input type="file" id="fileInput" accept="video/*" multiple style="display: none;" onchange="handleFileSelect()">
+                
+                <div id="selectedFiles" class="selected-files" style="display: none;">
+                    <h4><i class="fas fa-file-video"></i> Arquivos Selecionados <span id="fileCount" class="upload-count">0</span></h4>
+                    <ul id="fileList" class="file-list"></ul>
                 </div>
                 
-                <!-- Configurações comuns -->
                 <div style="margin-top: 30px;">
                     <h3><i class="fas fa-layer-group"></i> Qualidades de Saída</h3>
                     <div class="quality-selector">
@@ -1803,18 +1885,25 @@ DASHBOARD_HTML = '''
                     <i class="fas fa-play-circle"></i> Iniciar Conversão em Lote
                 </button>
                 
-                <!-- Progresso em tempo real -->
-                <div id="realTimeProgress" class="real-time-progress">
-                    <h4><i class="fas fa-tasks"></i> Progresso em Tempo Real</h4>
+                <!-- Botão de teste (debug) -->
+                <button class="btn btn-warning" onclick="testConversion()" id="testBtn" style="margin-top: 10px; width: 100%;">
+                    <i class="fas fa-vial"></i> Testar Conexão (Debug)
+                </button>
+                
+                <div id="processingDetails" class="processing-details">
+                    <h4><i class="fas fa-tasks"></i> Processando:</h4>
+                    <p>Arquivo atual: <span id="currentFileName" class="current-file"></span></p>
+                    <p>Progresso: <span id="currentFileProgress">0</span>/<span id="totalFiles">0</span></p>
+                </div>
+                
+                <div id="progress" style="display: none; margin-top: 30px;">
+                    <h3><i class="fas fa-spinner fa-spin"></i> Progresso da Conversão</h3>
                     <div class="progress-container">
-                        <div class="progress-bar" id="realTimeProgressBar" style="width: 0%">0%</div>
+                        <div class="progress-bar" id="progressBar" style="width: 0%">0%</div>
                     </div>
-                    <div class="progress-text" id="realTimeProgressText">
-                        Aguardando início...
-                    </div>
-                    <div class="current-processing" id="currentProcessing">
-                        <strong>Arquivo atual:</strong> <span id="currentFileName">Nenhum</span>
-                    </div>
+                    <p id="progressText" style="text-align: center; margin-top: 10px; color: #666;">
+                        Iniciando conversão em lote...
+                    </p>
                 </div>
                 
                 <!-- Container para exibir links gerados -->
@@ -1825,7 +1914,7 @@ DASHBOARD_HTML = '''
             </div>
         </div>
         
-        <!-- Conversions Tab -->
+        <!-- Conversions Tab - HISTÓRICO CORRIGIDO -->
         <div id="conversions" class="tab-content">
             <div class="card">
                 <h2><i class="fas fa-history"></i> Histórico de Conversões</h2>
@@ -1888,7 +1977,7 @@ DASHBOARD_HTML = '''
             </div>
         </div>
         
-        <!-- Backup Tab -->
+        <!-- Backup Tab - NOVA ABA -->
         <div id="backup" class="tab-content">
             <div class="card">
                 <h2><i class="fas fa-database"></i> Sistema de Backup</h2>
@@ -1934,42 +2023,72 @@ DASHBOARD_HTML = '''
                         </button>
                     </div>
                 </div>
+                
+                <!-- Restaurar Backup -->
+                <div class="backup-section" style="margin-top: 30px;">
+                    <h3><i class="fas fa-upload"></i> Restaurar Backup</h3>
+                    <p style="color: #666; margin-bottom: 15px;">
+                        Restaure o sistema a partir de um arquivo de backup.
+                    </p>
+                    
+                    <div style="margin-top: 20px;">
+                        <div class="upload-area" onclick="document.getElementById('restoreFile').click()">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                            <h3>Arraste e solte o arquivo de backup aqui</h3>
+                            <p>ou clique para selecionar (formato .tar.gz)</p>
+                        </div>
+                        <input type="file" id="restoreFile" accept=".tar.gz,.tgz" style="display: none;" onchange="handleRestoreFile()">
+                        
+                        <div id="selectedBackupFile" style="display: none; margin-top: 15px;">
+                            <div class="file-item">
+                                <span class="file-name" id="backupFileName"></span>
+                                <button class="remove-file" onclick="removeRestoreFile()">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <button class="btn btn-restore" onclick="restoreBackup()" id="restoreBtn" style="margin-top: 20px; width: 100%;">
+                            <i class="fas fa-upload"></i> Restaurar Sistema
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
         // Variáveis globais
-        let selectedExternalFiles = [];
-        let selectedInternalVideos = [];
+        let selectedFiles = [];
         let selectedQualities = ['240p', '480p', '720p', '1080p'];
-        let currentConversionId = null;
-        let progressInterval = null;
+        let restoreFileData = null;
         
-        // =============== NAVEGAÇÃO ===============
+        // =============== FUNÇÕES DE NAVEGAÇÃO ===============
         function showTab(tabName) {
+            // Esconder todas as abas
             document.querySelectorAll('.tab-content').forEach(tab => {
                 tab.classList.remove('active');
             });
             
+            // Remover active de todas as tabs
             document.querySelectorAll('.nav-tab').forEach(tab => {
                 tab.classList.remove('active');
             });
             
+            // Mostrar aba selecionada
             document.getElementById(tabName).classList.add('active');
             
+            // Ativar tab correspondente
             document.querySelectorAll('.nav-tab').forEach(tab => {
                 if (tab.textContent.includes(getTabLabel(tabName))) {
                     tab.classList.add('active');
                 }
             });
             
+            // Carregar dados específicos da aba
             switch(tabName) {
                 case 'dashboard':
                     loadSystemStats();
-                    break;
-                case 'upload':
-                    loadInternalVideos();
                     break;
                 case 'conversions':
                     loadConversions();
@@ -1994,80 +2113,56 @@ DASHBOARD_HTML = '''
             return labels[tabName];
         }
         
-        // =============== UPLOAD TABS ===============
-        function showUploadTab(tabName) {
-            document.querySelectorAll('.upload-tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            
-            document.querySelectorAll('.upload-content').forEach(content => {
-                content.classList.remove('active');
-            });
-            
-            document.querySelectorAll('.upload-tab').forEach(tab => {
-                if (tab.textContent.includes(tabName === 'external' ? 'Upload' : 'Internos')) {
-                    tab.classList.add('active');
-                }
-            });
-            
-            document.getElementById(tabName + 'Upload').classList.add('active');
-        }
-        
-        // =============== UPLOAD EXTERNO ===============
-        function handleExternalFileSelect() {
-            const fileInput = document.getElementById('fileInput');
-            if (fileInput.files.length > 0) {
-                Array.from(fileInput.files).forEach(file => {
-                    if (file.size > 2 * 1024 * 1024 * 1024) {
-                        showToast(`Arquivo ${file.name} muito grande (máximo 2GB)`, 'error');
+        // =============== SISTEMA ===============
+        function loadSystemStats() {
+            fetch('/api/system')
+                .then(response => {
+                    if (!response) {
+                        throw new Error('Sem resposta do servidor');
+                    }
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.error) {
+                        console.error('Erro ao carregar stats:', data.error);
                         return;
                     }
                     
-                    if (!selectedExternalFiles.some(f => f.name === file.name && f.size === file.size)) {
-                        selectedExternalFiles.push(file);
+                    document.getElementById('cpu').textContent = data.cpu || '--%';
+                    document.getElementById('memory').textContent = data.memory || '--%';
+                    document.getElementById('conversionsTotal').textContent = data.total_conversions || '0';
+                    document.getElementById('conversionsSuccess').textContent = data.success_conversions || '0';
+                    
+                    // Status do FFmpeg
+                    const ffmpegStatus = document.getElementById('ffmpegStatus');
+                    if (data.ffmpeg_status === 'ok') {
+                        ffmpegStatus.textContent = '✅ FFmpeg Disponível';
+                        ffmpegStatus.className = 'ffmpeg-status ffmpeg-ok';
+                        if (data.ffmpeg_path) {
+                            document.getElementById('ffmpegPath').textContent = `Local: ${data.ffmpeg_path}`;
+                        }
+                    } else {
+                        ffmpegStatus.textContent = '❌ FFmpeg Não Encontrado';
+                        ffmpegStatus.className = 'ffmpeg-status ffmpeg-error';
+                        document.getElementById('ffmpegPath').textContent = 'Execute: sudo apt-get install ffmpeg';
                     }
+                })
+                .catch(error => {
+                    console.error('Erro ao carregar stats:', error);
+                    showToast('Erro ao carregar status do sistema', 'error');
                 });
-                
-                updateExternalFileList();
-                
-                const selectedFilesDiv = document.getElementById('selectedExternalFiles');
-                selectedFilesDiv.style.display = 'block';
-            }
         }
         
-        function updateExternalFileList() {
-            const fileList = document.getElementById('externalFileList');
-            const fileCount = document.getElementById('externalFileCount');
-            
-            fileList.innerHTML = '';
-            fileCount.textContent = selectedExternalFiles.length;
-            
-            selectedExternalFiles.forEach((file, index) => {
-                const li = document.createElement('li');
-                li.className = 'file-item';
-                li.innerHTML = `
-                    <span class="file-name">${file.name}</span>
-                    <span class="file-size">${formatBytes(file.size)}</span>
-                    <button class="remove-file" onclick="removeExternalFile(${index})">
-                        <i class="fas fa-times"></i>
-                    </button>
-                `;
-                fileList.appendChild(li);
-            });
+        function refreshStats() {
+            loadSystemStats();
+            showToast('Status atualizado com sucesso', 'success');
         }
         
-        function removeExternalFile(index) {
-            selectedExternalFiles.splice(index, 1);
-            updateExternalFileList();
-            
-            if (selectedExternalFiles.length === 0) {
-                document.getElementById('selectedExternalFiles').style.display = 'none';
-            }
-        }
-        
-        // =============== ARQUIVOS INTERNOS ===============
-        function loadInternalVideos() {
-            fetch('/api/internal-videos')
+        function testFFmpeg() {
+            fetch('/api/ffmpeg-test')
                 .then(response => {
                     if (!response) {
                         throw new Error('Sem resposta do servidor');
@@ -2075,99 +2170,65 @@ DASHBOARD_HTML = '''
                     return response.json();
                 })
                 .then(data => {
-                    const container = document.getElementById('internalVideosContainer');
-                    const controls = document.getElementById('internalSelectionControls');
-                    
-                    if (!data.videos || data.videos.length === 0) {
-                        container.innerHTML = `
-                            <div class="empty-state">
-                                <i class="fas fa-video-slash"></i>
-                                <p>Nenhum vídeo encontrado no diretório interno</p>
-                                <p style="font-size: 0.9rem; color: #666;">
-                                    Adicione vídeos em: /opt/hls-converter/videos_internos/
-                                </p>
-                            </div>
-                        `;
-                        controls.style.display = 'none';
-                        return;
+                    if (data && data.success) {
+                        showToast(`✅ FFmpeg funcionando! Versão: ${data.version}`, 'success');
+                    } else {
+                        showToast(`❌ FFmpeg não está funcionando: ${data?.error || 'Erro desconhecido'}`, 'error');
                     }
-                    
-                    let html = '';
-                    data.videos.forEach((video, index) => {
-                        const isSelected = selectedInternalVideos.some(v => v.path === video.path);
-                        html += `
-                            <div class="internal-video-item ${isSelected ? 'selected' : ''}" onclick="toggleInternalVideo(${index})">
-                                <div class="internal-video-info">
-                                    <div class="internal-video-name">${video.name}</div>
-                                    <div class="internal-video-meta">
-                                        ${formatBytes(video.size)} • 
-                                        ${formatDate(video.modified)}
-                                    </div>
-                                </div>
-                                <input type="checkbox" class="internal-video-checkbox" 
-                                       ${isSelected ? 'checked' : ''}
-                                       onclick="event.stopPropagation(); toggleInternalVideo(${index})">
-                            </div>
-                        `;
-                    });
-                    
-                    container.innerHTML = html;
-                    controls.style.display = 'block';
-                    updateInternalSelectionCount();
-                    
                 })
-                .catch(error => {
-                    console.error('Erro ao carregar vídeos internos:', error);
-                    showToast('Erro ao carregar vídeos internos', 'error');
+                .catch((error) => {
+                    showToast(`❌ Erro ao testar FFmpeg: ${error.message || 'Servidor não respondeu'}`, 'error');
                 });
         }
         
-        function toggleInternalVideo(index) {
-            fetch('/api/internal-videos')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.videos && data.videos[index]) {
-                        const video = data.videos[index];
-                        const existingIndex = selectedInternalVideos.findIndex(v => v.path === video.path);
-                        
-                        if (existingIndex === -1) {
-                            selectedInternalVideos.push(video);
-                        } else {
-                            selectedInternalVideos.splice(existingIndex, 1);
-                        }
-                        
-                        loadInternalVideos();
+        // =============== MULTI-UPLOAD COM NOME ===============
+        function handleFileSelect() {
+            const fileInput = document.getElementById('fileInput');
+            if (fileInput.files.length > 0) {
+                Array.from(fileInput.files).forEach(file => {
+                    // Evitar duplicados
+                    if (!selectedFiles.some(f => f.name === file.name && f.size === file.size)) {
+                        selectedFiles.push(file);
                     }
-                })
-                .catch(error => {
-                    console.error('Erro ao obter vídeo:', error);
                 });
+                
+                updateFileList();
+                
+                const selectedFilesDiv = document.getElementById('selectedFiles');
+                selectedFilesDiv.style.display = 'block';
+            }
         }
         
-        function selectAllInternalVideos() {
-            fetch('/api/internal-videos')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.videos) {
-                        selectedInternalVideos = [...data.videos];
-                        loadInternalVideos();
-                    }
-                })
-                .catch(error => {
-                    console.error('Erro ao selecionar todos:', error);
-                });
+        function updateFileList() {
+            const fileList = document.getElementById('fileList');
+            const fileCount = document.getElementById('fileCount');
+            
+            fileList.innerHTML = '';
+            fileCount.textContent = selectedFiles.length;
+            
+            selectedFiles.forEach((file, index) => {
+                const li = document.createElement('li');
+                li.className = 'file-item';
+                li.innerHTML = `
+                    <span class="file-name">${file.name}</span>
+                    <span class="file-size">${formatBytes(file.size)}</span>
+                    <button class="remove-file" onclick="removeFile(${index})">
+                        <i class="fas fa-times"></i>
+                    </button>
+                `;
+                fileList.appendChild(li);
+            });
         }
         
-        function deselectAllInternalVideos() {
-            selectedInternalVideos = [];
-            loadInternalVideos();
+        function removeFile(index) {
+            selectedFiles.splice(index, 1);
+            updateFileList();
+            
+            if (selectedFiles.length === 0) {
+                document.getElementById('selectedFiles').style.display = 'none';
+            }
         }
         
-        function updateInternalSelectionCount() {
-            document.getElementById('internalSelectedCount').textContent = selectedInternalVideos.length;
-        }
-        
-        // =============== CONVERSÃO MULTIARQUIVOS ===============
         function toggleQuality(element) {
             const quality = element.getAttribute('data-quality');
             const index = selectedQualities.indexOf(quality);
@@ -2181,7 +2242,9 @@ DASHBOARD_HTML = '''
             }
         }
         
+        // FUNÇÃO PRINCIPAL CORRIGIDA
         function startConversion() {
+            // Verificar nome da conversão
             const conversionName = document.getElementById('conversionName').value.trim();
             if (!conversionName) {
                 showToast('Por favor, digite um nome para a conversão', 'warning');
@@ -2189,28 +2252,9 @@ DASHBOARD_HTML = '''
                 return;
             }
             
-            let totalFiles = 0;
-            let formData = new FormData();
-            let useInternal = document.querySelector('#internalUpload').classList.contains('active');
-            
-            if (useInternal) {
-                if (selectedInternalVideos.length === 0) {
-                    showToast('Por favor, selecione pelo menos um vídeo interno!', 'warning');
-                    return;
-                }
-                totalFiles = selectedInternalVideos.length;
-                formData.append('video_paths', JSON.stringify(selectedInternalVideos.map(v => v.path)));
-                formData.append('source_type', 'internal');
-            } else {
-                if (selectedExternalFiles.length === 0) {
-                    showToast('Por favor, selecione pelo menos um arquivo!', 'warning');
-                    return;
-                }
-                totalFiles = selectedExternalFiles.length;
-                selectedExternalFiles.forEach(file => {
-                    formData.append('files[]', file);
-                });
-                formData.append('source_type', 'external');
+            if (selectedFiles.length === 0) {
+                showToast('Por favor, selecione pelo menos um arquivo!', 'warning');
+                return;
             }
             
             if (selectedQualities.length === 0) {
@@ -2218,60 +2262,86 @@ DASHBOARD_HTML = '''
                 return;
             }
             
+            const formData = new FormData();
+            
+            // Adicionar todos os arquivos
+            selectedFiles.forEach(file => {
+                formData.append('files[]', file);
+            });
+            
             formData.append('qualities', JSON.stringify(selectedQualities));
             formData.append('keep_order', document.getElementById('keepOrder').checked);
             formData.append('conversion_name', conversionName);
             
-            const progressSection = document.getElementById('realTimeProgress');
-            progressSection.classList.add('show');
+            // Mostrar progresso
+            const progressSection = document.getElementById('progress');
+            const processingDetails = document.getElementById('processingDetails');
+            
+            progressSection.style.display = 'block';
+            processingDetails.classList.add('show');
             
             const convertBtn = document.getElementById('convertBtn');
             const originalBtnText = convertBtn.innerHTML;
             convertBtn.disabled = true;
             convertBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Convertendo...';
             
-            currentConversionId = 'temp_' + Date.now();
-            startProgressMonitoring();
+            // Atualizar detalhes do processamento
+            document.getElementById('totalFiles').textContent = selectedFiles.length;
+            document.getElementById('currentFileName').textContent = selectedFiles[0].name;
+            document.getElementById('currentFileProgress').textContent = '0';
             
+            // Atualizar progresso inicial
+            updateProgress(0, 'Iniciando conversão...');
+            
+            // REQUISIÇÃO CORRIGIDA COM MELHOR TRATAMENTO DE ERRO
             fetch('/convert-multiple', {
                 method: 'POST',
                 body: formData
             })
             .then(response => {
+                // Verificar se há resposta
                 if (!response) {
                     throw new Error('O servidor não respondeu');
                 }
                 
+                // Verificar status HTTP
                 if (!response.ok) {
                     throw new Error(`Erro HTTP ${response.status}: ${response.statusText}`);
                 }
                 
-                return response.json();
+                // Tentar parsear JSON
+                return response.json().catch(() => {
+                    throw new Error('Resposta inválida do servidor (não é JSON)');
+                });
             })
             .then(data => {
                 console.log('Resposta da conversão:', data);
                 
-                stopProgressMonitoring();
-                
+                // Verificar se data existe
                 if (!data) {
                     throw new Error('Resposta vazia do servidor');
                 }
                 
                 if (data.success) {
-                    updateRealTimeProgress(100, 'Conversão completa!', '');
+                    updateProgress(100, 'Concluído!');
+                    
+                    // Mostrar links gerados
                     showConversionLinks(data);
+                    
                     showToast(`✅ "${conversionName}" convertido com sucesso!`, 'success');
                     
+                    // Reset após 5 segundos
                     setTimeout(() => {
-                        progressSection.classList.remove('show');
-                        document.getElementById('selectedExternalFiles').style.display = 'none';
+                        progressSection.style.display = 'none';
+                        processingDetails.classList.remove('show');
+                        document.getElementById('selectedFiles').style.display = 'none';
                         document.getElementById('fileInput').value = '';
-                        selectedExternalFiles = [];
-                        selectedInternalVideos = [];
-                        loadInternalVideos();
+                        selectedFiles = [];
                         convertBtn.disabled = false;
                         convertBtn.innerHTML = originalBtnText;
+                        updateProgress(0, '');
                         
+                        // Atualizar histórico
                         loadConversions();
                         loadSystemStats();
                     }, 5000);
@@ -2284,55 +2354,54 @@ DASHBOARD_HTML = '''
             })
             .catch(error => {
                 console.error('Erro na conversão:', error);
-                stopProgressMonitoring();
                 showToast(`❌ Erro de conexão: ${error.message || 'Servidor não respondeu'}`, 'error');
                 convertBtn.disabled = false;
                 convertBtn.innerHTML = originalBtnText;
             });
         }
         
-        function startProgressMonitoring() {
-            if (progressInterval) {
-                clearInterval(progressInterval);
+        // Função de teste para debug
+        function testConversion() {
+            if (selectedFiles.length === 0) {
+                showToast('Por favor, selecione arquivos primeiro', 'warning');
+                return;
             }
             
-            progressInterval = setInterval(() => {
-                if (currentConversionId) {
-                    fetch(`/api/progress/${currentConversionId}`)
-                        .then(response => response.json())
-                        .then(data => {
-                            if (data) {
-                                updateRealTimeProgress(
-                                    data.progress_percent || 0,
-                                    data.message || "Processando...",
-                                    data.filename || ""
-                                );
-                            }
-                        })
-                        .catch(() => {
-                            // Ignora erros de polling
-                        });
-                }
-            }, 2000);
-        }
-        
-        function stopProgressMonitoring() {
-            if (progressInterval) {
-                clearInterval(progressInterval);
-                progressInterval = null;
-            }
-            currentConversionId = null;
-        }
-        
-        function updateRealTimeProgress(percent, message, filename) {
-            const progressBar = document.getElementById('realTimeProgressBar');
-            const progressText = document.getElementById('realTimeProgressText');
-            const currentFile = document.getElementById('currentFileName');
+            showToast('Testando conexão com o servidor...', 'info');
             
+            // Testar a rota de saúde primeiro
+            fetch('/health')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`Health check falhou: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.status === 'healthy') {
+                        showToast('✅ Servidor está saudável!', 'success');
+                        
+                        // Testar se a rota de conversão está acessível
+                        return fetch('/convert-multiple', { method: 'HEAD' });
+                    } else {
+                        throw new Error('Servidor não está saudável');
+                    }
+                })
+                .then(response => {
+                    if (response) {
+                        showToast('✅ Rota de conversão está acessível!', 'success');
+                    }
+                })
+                .catch(error => {
+                    showToast(`❌ Teste falhou: ${error.message}`, 'error');
+                });
+        }
+        
+        function updateProgress(percent, text) {
+            const progressBar = document.getElementById('progressBar');
             progressBar.style.width = percent + '%';
             progressBar.textContent = percent + '%';
-            progressText.textContent = message;
-            currentFile.textContent = filename || "Nenhum";
+            document.getElementById('progressText').textContent = text;
         }
         
         function showConversionLinks(data) {
@@ -2342,34 +2411,35 @@ DASHBOARD_HTML = '''
             const baseUrl = window.location.origin;
             let html = '';
             
+            // Link principal da playlist master
             html += `
                 <div class="link-item">
                     <div class="link-info">
-                        <div class="link-title">🎬 ${data.conversion_name}</div>
+                        <div class="link-title">Master Playlist - ${data.conversion_name}</div>
                         <div class="link-url">${baseUrl}/hls/${data.playlist_id}/master.m3u8</div>
                         <small style="color: #666;">Playlist principal com todas as qualidades</small>
                     </div>
                     <div class="link-actions">
                         <button class="btn btn-primary btn-sm" onclick="copyToClipboard('${baseUrl}/hls/${data.playlist_id}/master.m3u8')">
-                            <i class="fas fa-copy"></i> Copiar
+                            <i class="fas fa-copy"></i>
                         </button>
                         <button class="btn btn-success btn-sm" onclick="window.open('/player/${data.playlist_id}', '_blank')">
-                            <i class="fas fa-play"></i> Player
+                            <i class="fas fa-play"></i>
                         </button>
                     </div>
                 </div>
             `;
             
-            if (data.quality_links && Object.keys(data.quality_links).length > 0) {
-                html += '<h4 style="margin-top: 20px; color: #666;"><i class="fas fa-layer-group"></i> Qualidades Disponíveis:</h4>';
-                
+            // Links para cada qualidade (CORRIGIDO)
+            if (data.quality_links) {
                 for (const [quality, path] of Object.entries(data.quality_links)) {
                     const fullUrl = `${baseUrl}${path}`;
                     html += `
                         <div class="link-item">
                             <div class="link-info">
-                                <div class="link-title">${quality}</div>
+                                <div class="link-title">${quality} - ${data.conversion_name}</div>
                                 <div class="link-url">${fullUrl}</div>
+                                <small style="color: #666;">Playlist específica para qualidade ${quality}</small>
                             </div>
                             <div class="link-actions">
                                 <button class="btn btn-primary btn-sm" onclick="copyToClipboard('${fullUrl}')">
@@ -2381,33 +2451,472 @@ DASHBOARD_HTML = '''
                 }
             }
             
+            // Links para vídeos individuais (se existirem)
+            if (data.video_links && data.video_links.length > 0) {
+                html += `<div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #ddd;">
+                    <h4><i class="fas fa-file-video"></i> Links para Vídeos Individuais:</h4>`;
+                
+                data.video_links.forEach(video => {
+                    html += `<div class="video-links">`;
+                    html += `<div><strong>${video.filename}</strong></div>`;
+                    for (const [quality, path] of Object.entries(video.links)) {
+                        const fullUrl = `${baseUrl}/hls/${path}`;
+                        html += `
+                            <div class="video-link-item">
+                                ${quality}: ${fullUrl}
+                                <button class="btn btn-primary btn-sm" style="margin-left: 10px; padding: 2px 8px;" onclick="copyToClipboard('${fullUrl}')">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                        `;
+                    }
+                    html += `</div>`;
+                });
+                html += `</div>`;
+            }
+            
             linksList.innerHTML = html;
             linksContainer.classList.add('show');
+            
+            // Rolar para ver os links
             linksContainer.scrollIntoView({ behavior: 'smooth' });
         }
         
-        // =============== UTILITÁRIOS ===============
         function copyToClipboard(text) {
-            const textArea = document.createElement('textarea');
-            textArea.value = text;
-            textArea.style.position = 'fixed';
-            textArea.style.left = '-999999px';
-            textArea.style.top = '-999999px';
-            document.body.appendChild(textArea);
-            textArea.focus();
-            textArea.select();
-            
-            try {
-                document.execCommand('copy');
-                showToast('✅ Link copiado para a área de transferência!', 'success');
-            } catch (err) {
-                console.error('Erro ao copiar:', err);
-                showToast('❌ Erro ao copiar link', 'error');
-            } finally {
-                document.body.removeChild(textArea);
+            navigator.clipboard.writeText(text)
+                .then(() => showToast('✅ Link copiado para a área de transferência!', 'success'))
+                .catch(() => {
+                    // Fallback
+                    const textArea = document.createElement('textarea');
+                    textArea.value = text;
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textArea);
+                    showToast('✅ Link copiado!', 'success');
+                });
+        }
+        
+        // =============== HISTÓRICO DE CONVERSÕES ===============
+        function loadConversions() {
+            fetch('/api/conversions')
+                .then(response => {
+                    if (!response) {
+                        throw new Error('Sem resposta do servidor');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    const container = document.getElementById('conversionsList');
+                    const statsContainer = document.getElementById('conversionStats');
+                    
+                    // Atualizar estatísticas
+                    if (data.stats) {
+                        statsContainer.innerHTML = `
+                            Total: ${data.stats.total || 0} | 
+                            Sucesso: ${data.stats.success || 0} | 
+                            Falhas: ${data.stats.failed || 0}
+                        `;
+                    }
+                    
+                    if (!data.conversions || data.conversions.length === 0) {
+                        container.innerHTML = `
+                            <div class="empty-state">
+                                <i class="fas fa-history"></i>
+                                <h3>Nenhuma conversão realizada ainda</h3>
+                                <p>Converta seu primeiro vídeo para ver o histórico aqui</p>
+                            </div>
+                        `;
+                        return;
+                    }
+                    
+                    let html = '<div class="conversions-list">';
+                    
+                    const conversions = Array.isArray(data.conversions) ? data.conversions : [];
+                    
+                    conversions.forEach(conv => {
+                        const videoId = conv.video_id || conv.id || 'N/A';
+                        const filename = conv.filename || 'Arquivo desconhecido';
+                        const timestamp = conv.timestamp || new Date().toISOString();
+                        const qualities = Array.isArray(conv.qualities) ? conv.qualities : [];
+                        const status = conv.status || 'unknown';
+                        const conversionName = conv.conversion_name || conv.filename;
+                        
+                        html += `
+                            <div class="conversion-card">
+                                <div class="conversion-header">
+                                    <span class="conversion-id">${conversionName.substring(0, 20)}${conversionName.length > 20 ? '...' : ''}</span>
+                                    <span class="conversion-status status-${status}">
+                                        ${status === 'success' ? '✅ Sucesso' : '❌ Falha'}
+                                    </span>
+                                </div>
+                                <div class="conversion-info">
+                                    <p><strong>Nome:</strong> ${conversionName}</p>
+                                    <p><strong>Data:</strong> ${formatDate(timestamp)}</p>
+                                    <p><strong>Qualidades:</strong> ${qualities.join(', ') || 'N/A'}</p>
+                                    <p><strong>Arquivos:</strong> ${conv.videos_count || 1}</p>
+                                </div>
+                                <div class="conversion-actions">
+                                    <button class="btn btn-primary" onclick="copyLink('${videoId}')">
+                                        <i class="fas fa-link"></i> Link
+                                    </button>
+                                    <button class="btn btn-success" onclick="playVideo('${videoId}')">
+                                        <i class="fas fa-play"></i> Play
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    html += '</div>';
+                    container.innerHTML = html;
+                })
+                .catch(error => {
+                    console.error('Erro ao carregar conversões:', error);
+                    document.getElementById('conversionsList').innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <h3>Erro ao carregar histórico</h3>
+                            <p>${error.message}</p>
+                        </div>
+                    `;
+                    showToast('Erro ao carregar histórico de conversões', 'error');
+                });
+        }
+        
+        function clearHistory() {
+            if (confirm('Tem certeza que deseja limpar todo o histórico de conversões?')) {
+                fetch('/api/clear-history', { method: 'POST' })
+                    .then(response => {
+                        if (!response) {
+                            throw new Error('Sem resposta do servidor');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data.success) {
+                            showToast('✅ Histórico limpo com sucesso!', 'success');
+                            loadConversions();
+                            loadSystemStats();
+                        } else {
+                            showToast(`❌ Erro: ${data.error}`, 'error');
+                        }
+                    })
+                    .catch(error => {
+                        showToast('❌ Erro ao limpar histórico', 'error');
+                    });
             }
         }
         
+        function copyLink(videoId) {
+            const link = window.location.origin + '/hls/' + videoId + '/master.m3u8';
+            copyToClipboard(link);
+        }
+        
+        function playVideo(videoId) {
+            window.open('/player/' + videoId, '_blank');
+        }
+        
+        // =============== CONFIGURAÇÕES ===============
+        function changePassword() {
+            window.location.href = '/change-password';
+        }
+        
+        function cleanupFiles() {
+            if (confirm('Limpar todos os arquivos temporários e convertidos?')) {
+                fetch('/api/cleanup', { method: 'POST' })
+                    .then(response => {
+                        if (!response) {
+                            throw new Error('Sem resposta do servidor');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data.success) {
+                            showToast(`✅ ${data.message}`, 'success');
+                        } else {
+                            showToast(`❌ Erro: ${data.error}`, 'error');
+                        }
+                    })
+                    .catch(() => {
+                        showToast('❌ Erro ao limpar arquivos', 'error');
+                    });
+            }
+        }
+        
+        function cleanupOldFiles() {
+            if (confirm('Limpar arquivos antigos (mais de 7 dias)?')) {
+                fetch('/api/cleanup-old', { method: 'POST' })
+                    .then(response => {
+                        if (!response) {
+                            throw new Error('Sem resposta do servidor');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        showToast(data.message || '✅ Arquivos antigos removidos', 'success');
+                    })
+                    .catch(() => {
+                        showToast('❌ Erro ao limpar arquivos antigos', 'error');
+                    });
+            }
+        }
+        
+        function loadSystemInfo() {
+            fetch('/api/system-info')
+                .then(response => {
+                    if (!response) {
+                        throw new Error('Sem resposta do servidor');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    const container = document.getElementById('systemInfo');
+                    container.innerHTML = `
+                        <p><strong>Versão:</strong> ${data.version || 'N/A'}</p>
+                        <p><strong>Diretório:</strong> ${data.base_dir || 'N/A'}</p>
+                        <p><strong>Usuários:</strong> ${data.users_count || 0}</p>
+                        <p><strong>Serviço:</strong> ${data.service_status || 'N/A'}</p>
+                        <p><strong>Uptime:</strong> ${data.uptime || 'N/A'}</p>
+                        <p><strong>Backup:</strong> ${data.backup_enabled ? 'Habilitado' : 'Desabilitado'}</p>
+                    `;
+                })
+                .catch(error => {
+                    document.getElementById('systemInfo').innerHTML = 'Erro ao carregar informações';
+                });
+        }
+        
+        // =============== BACKUP ===============
+        function createBackup() {
+            const backupName = document.getElementById('backupName').value.trim();
+            const nameParam = backupName ? `?name=${encodeURIComponent(backupName)}` : '';
+            
+            showToast('Criando backup...', 'info');
+            
+            fetch(`/api/backup/create${nameParam}`, { method: 'POST' })
+                .then(response => {
+                    if (!response) {
+                        throw new Error('Sem resposta do servidor');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.success) {
+                        showToast(`✅ Backup criado: ${data.backup_name} (${formatBytes(data.size)})`, 'success');
+                        document.getElementById('backupName').value = '';
+                        loadBackups();
+                        
+                        // Oferecer download
+                        if (confirm('Deseja baixar o backup agora?')) {
+                            window.open(`/api/backup/download/${data.backup_name}`, '_blank');
+                        }
+                    } else {
+                        showToast(`❌ Erro: ${data.error}`, 'error');
+                    }
+                })
+                .catch(error => {
+                    showToast(`❌ Erro de conexão: ${error.message}`, 'error');
+                });
+        }
+        
+        function loadBackups() {
+            fetch('/api/backup/list')
+                .then(response => {
+                    if (!response) {
+                        throw new Error('Sem resposta do servidor');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    const container = document.getElementById('backupsList');
+                    
+                    if (!data.backups || data.backups.length === 0) {
+                        container.innerHTML = `
+                            <div class="empty-state">
+                                <i class="fas fa-database"></i>
+                                <p>Nenhum backup encontrado</p>
+                        </div>
+                        `;
+                        return;
+                    }
+                    
+                    let html = '';
+                    data.backups.forEach(backup => {
+                        html += `
+                            <div class="backup-item">
+                                <div>
+                                    <strong>${backup.name}</strong><br>
+                                    <small style="color: #666;">
+                                        ${formatDate(backup.modified)} • ${formatBytes(backup.size)}
+                                    </small>
+                                </div>
+                                <div class="backup-actions">
+                                    <button class="btn btn-restore btn-sm" onclick="downloadBackup('${backup.name}')">
+                                        <i class="fas fa-download"></i>
+                                    </button>
+                                    <button class="btn btn-backup btn-sm" onclick="restoreSpecificBackup('${backup.name}')">
+                                        <i class="fas fa-upload"></i>
+                                    </button>
+                                    <button class="btn btn-danger btn-sm" onclick="deleteBackup('${backup.name}')">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    container.innerHTML = html;
+                })
+                .catch(error => {
+                    showToast('Erro ao carregar backups', 'error');
+                });
+        }
+        
+        function downloadBackup(backupName) {
+            window.open(`/api/backup/download/${backupName}`, '_blank');
+        }
+        
+        function restoreSpecificBackup(backupName) {
+            if (confirm(`Restaurar backup "${backupName}"? O sistema será reiniciado.`)) {
+                fetch(`/api/backup/restore/${backupName}`, { method: 'POST' })
+                    .then(response => {
+                        if (!response) {
+                            throw new Error('Sem resposta do servidor');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data.success) {
+                            showToast('✅ Backup restaurado! Reiniciando...', 'success');
+                            setTimeout(() => {
+                                window.location.reload();
+                            }, 2000);
+                        } else {
+                            showToast(`❌ Erro: ${data.error}`, 'error');
+                        }
+                    })
+                    .catch(error => {
+                        showToast('Erro ao restaurar backup', 'error');
+                    });
+            }
+        }
+        
+        function deleteBackup(backupName) {
+            if (confirm(`Excluir backup "${backupName}" permanentemente?`)) {
+                fetch(`/api/backup/delete/${backupName}`, { method: 'DELETE' })
+                    .then(response => {
+                        if (!response) {
+                            throw new Error('Sem resposta do servidor');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data.success) {
+                            showToast('✅ Backup excluído', 'success');
+                            loadBackups();
+                        } else {
+                            showToast(`❌ Erro: ${data.error}`, 'error');
+                        }
+                    })
+                    .catch(error => {
+                        showToast('Erro ao excluir backup', 'error');
+                    });
+            }
+        }
+        
+        function deleteAllBackups() {
+            if (confirm('Excluir TODOS os backups permanentemente?')) {
+                fetch('/api/backup/delete-all', { method: 'DELETE' })
+                    .then(response => {
+                        if (!response) {
+                            throw new Error('Sem resposta do servidor');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data.success) {
+                            showToast(`✅ ${data.deleted} backups excluídos`, 'success');
+                            loadBackups();
+                        } else {
+                            showToast(`❌ Erro: ${data.error}`, 'error');
+                        }
+                    })
+                    .catch(error => {
+                        showToast('Erro ao excluir backups', 'error');
+                    });
+            }
+        }
+        
+        function handleRestoreFile() {
+            const fileInput = document.getElementById('restoreFile');
+            if (fileInput.files.length > 0) {
+                const file = fileInput.files[0];
+                if (!file.name.endsWith('.tar.gz') && !file.name.endsWith('.tgz')) {
+                    showToast('Por favor, selecione um arquivo .tar.gz', 'error');
+                    fileInput.value = '';
+                    return;
+                }
+                
+                restoreFileData = file;
+                document.getElementById('backupFileName').textContent = file.name;
+                document.getElementById('selectedBackupFile').style.display = 'block';
+            }
+        }
+        
+        function removeRestoreFile() {
+            document.getElementById('restoreFile').value = '';
+            document.getElementById('selectedBackupFile').style.display = 'none';
+            restoreFileData = null;
+        }
+        
+        function restoreBackup() {
+            if (!restoreFileData) {
+                showToast('Por favor, selecione um arquivo de backup', 'warning');
+                return;
+            }
+            
+            if (!confirm('ATENÇÃO: Restaurar backup substituirá todas as configurações atuais. Continuar?')) {
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('backup', restoreFileData);
+            
+            const restoreBtn = document.getElementById('restoreBtn');
+            const originalBtnText = restoreBtn.innerHTML;
+            restoreBtn.disabled = true;
+            restoreBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Restaurando...';
+            
+            fetch('/api/backup/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response) {
+                    throw new Error('Sem resposta do servidor');
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    showToast('✅ Backup restaurado! Reiniciando sistema...', 'success');
+                    setTimeout(() => {
+                        window.location.href = '/login';
+                    }, 3000);
+                } else {
+                    showToast(`❌ Erro: ${data.error}`, 'error');
+                    restoreBtn.disabled = false;
+                    restoreBtn.innerHTML = originalBtnText;
+                }
+            })
+            .catch(error => {
+                showToast(`❌ Erro: ${error.message}`, 'error');
+                restoreBtn.disabled = false;
+                restoreBtn.innerHTML = originalBtnText;
+            });
+        }
+        
+        // =============== UTILITÁRIOS ===============
         function formatBytes(bytes) {
             if (bytes === 0) return '0 Bytes';
             const k = 1024;
@@ -2426,6 +2935,7 @@ DASHBOARD_HTML = '''
         }
         
         function showToast(message, type = 'info') {
+            // Remover toasts anteriores
             document.querySelectorAll('.toast').forEach(toast => toast.remove());
             
             const toast = document.createElement('div');
@@ -2437,6 +2947,7 @@ DASHBOARD_HTML = '''
             
             document.body.appendChild(toast);
             
+            // Remover após 5 segundos
             setTimeout(() => {
                 toast.remove();
             }, 5000);
@@ -2445,43 +2956,68 @@ DASHBOARD_HTML = '''
         // =============== INICIALIZAÇÃO ===============
         document.addEventListener('DOMContentLoaded', function() {
             loadSystemStats();
-            loadInternalVideos();
             
+            // Atualizar stats a cada 30 segundos
             setInterval(loadSystemStats, 30000);
             
-            const externalUploadArea = document.querySelector('#externalUpload .upload-area');
+            // Configurar drag and drop
+            const uploadArea = document.querySelector('#upload .upload-area');
             
-            externalUploadArea.addEventListener('dragover', (e) => {
+            uploadArea.addEventListener('dragover', (e) => {
                 e.preventDefault();
-                externalUploadArea.style.backgroundColor = 'rgba(67, 97, 238, 0.1)';
+                uploadArea.style.backgroundColor = 'rgba(67, 97, 238, 0.1)';
             });
             
-            externalUploadArea.addEventListener('dragleave', () => {
-                externalUploadArea.style.backgroundColor = '';
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.style.backgroundColor = '';
             });
             
-            externalUploadArea.addEventListener('drop', (e) => {
+            uploadArea.addEventListener('drop', (e) => {
                 e.preventDefault();
-                externalUploadArea.style.backgroundColor = '';
+                uploadArea.style.backgroundColor = '';
                 
                 if (e.dataTransfer.files.length > 0) {
                     Array.from(e.dataTransfer.files).forEach(file => {
-                        if (file.size > 2 * 1024 * 1024 * 1024) {
-                            showToast(`Arquivo ${file.name} muito grande (máximo 2GB)`, 'error');
-                            return;
-                        }
-                        
-                        if (!selectedExternalFiles.some(f => f.name === file.name && f.size === file.size)) {
-                            selectedExternalFiles.push(file);
+                        if (!selectedFiles.some(f => f.name === file.name && f.size === file.size)) {
+                            selectedFiles.push(file);
                         }
                     });
                     
-                    updateExternalFileList();
+                    updateFileList();
                     
-                    const selectedFilesDiv = document.getElementById('selectedExternalFiles');
+                    const selectedFilesDiv = document.getElementById('selectedFiles');
                     selectedFilesDiv.style.display = 'block';
                 }
             });
+            
+            // Configurar drag and drop para backup
+            const backupUploadArea = document.querySelector('#backup .upload-area');
+            if (backupUploadArea) {
+                backupUploadArea.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    backupUploadArea.style.backgroundColor = 'rgba(67, 97, 238, 0.1)';
+                });
+                
+                backupUploadArea.addEventListener('dragleave', () => {
+                    backupUploadArea.style.backgroundColor = '';
+                });
+                
+                backupUploadArea.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    backupUploadArea.style.backgroundColor = '';
+                    
+                    if (e.dataTransfer.files.length > 0) {
+                        const file = e.dataTransfer.files[0];
+                        if (file.name.endsWith('.tar.gz') || file.name.endsWith('.tgz')) {
+                            restoreFileData = file;
+                            document.getElementById('backupFileName').textContent = file.name;
+                            document.getElementById('selectedBackupFile').style.display = 'block';
+                        } else {
+                            showToast('Por favor, solte apenas arquivos .tar.gz', 'error');
+                        }
+                    }
+                });
+            }
         });
     </script>
 </body>
@@ -2638,38 +3174,313 @@ def api_conversions():
             "stats": {"total": 0, "success": 0, "failed": 0}
         })
 
-@app.route('/api/progress/<playlist_id>')
-def api_progress(playlist_id):
-    """Endpoint para obter progresso da conversão"""
-    progress = get_progress(playlist_id)
-    return jsonify(progress)
-
-@app.route('/api/internal-videos')
-def api_internal_videos():
-    """Endpoint para listar vídeos internos"""
+@app.route('/api/clear-history', methods=['POST'])
+def api_clear_history():
+    """Limpar histórico de conversões"""
     try:
-        videos = list_internal_videos()
+        data = load_conversions()
+        count = len(data.get('conversions', []))
+        
+        data['conversions'] = []
+        data['stats']['total'] = 0
+        data['stats']['success'] = 0
+        data['stats']['failed'] = 0
+        
+        save_conversions(data)
+        
+        log_activity(f"Histórico de conversões limpo: {count} entradas removidas")
+        
         return jsonify({
             "success": True,
-            "videos": videos,
-            "count": len(videos)
+            "message": f"{count} conversões removidas do histórico"
         })
     except Exception as e:
         return jsonify({
             "success": False,
-            "error": str(e),
-            "videos": []
+            "error": str(e)
         })
 
-# =============== ROTA DE CONVERSÃO MULTIARQUIVOS ===============
+@app.route('/api/cleanup', methods=['POST'])
+def api_cleanup():
+    """Limpar todos os arquivos"""
+    try:
+        deleted_count = 0
+        
+        if os.path.exists(UPLOAD_DIR):
+            for filename in os.listdir(UPLOAD_DIR):
+                filepath = os.path.join(UPLOAD_DIR, filename)
+                if os.path.isfile(filepath):
+                    os.remove(filepath)
+                    deleted_count += 1
+        
+        if os.path.exists(HLS_DIR):
+            for item in os.listdir(HLS_DIR):
+                item_path = os.path.join(HLS_DIR, item)
+                if os.path.isdir(item_path) and item not in ['240p', '360p', '480p', '720p', '1080p', 'original']:
+                    shutil.rmtree(item_path, ignore_errors=True)
+                    deleted_count += 1
+        
+        log_activity(f"Limpeza realizada: {deleted_count} arquivos removidos")
+        
+        return jsonify({
+            "success": True,
+            "message": f"{deleted_count} arquivos removidos"
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
 
-@app.route('/convert-multiple', methods=['POST'])
-def convert_multiple_videos():
-    """Converter múltiplos vídeos - VERSÃO MULTIARQUIVOS CORRIGIDA"""
+@app.route('/api/cleanup-old', methods=['POST'])
+def api_cleanup_old():
+    """Limpar arquivos antigos"""
+    try:
+        deleted_count = 0
+        now = time.time()
+        
+        if os.path.exists(UPLOAD_DIR):
+            for filename in os.listdir(UPLOAD_DIR):
+                filepath = os.path.join(UPLOAD_DIR, filename)
+                if os.path.isfile(filepath):
+                    file_age = now - os.path.getmtime(filepath)
+                    if file_age > 7 * 24 * 3600:
+                        os.remove(filepath)
+                        deleted_count += 1
+        
+        if os.path.exists(HLS_DIR):
+            for item in os.listdir(HLS_DIR):
+                item_path = os.path.join(HLS_DIR, item)
+                if os.path.isdir(item_path):
+                    dir_age = now - os.path.getmtime(item_path)
+                    if dir_age > 7 * 24 * 3600:
+                        shutil.rmtree(item_path, ignore_errors=True)
+                        deleted_count += 1
+        
+        return jsonify({
+            "success": True,
+            "message": f"{deleted_count} arquivos/diretórios antigos removidos"
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
+
+@app.route('/api/ffmpeg-test')
+def api_ffmpeg_test():
+    """Testar FFmpeg"""
+    ffmpeg_path = find_ffmpeg()
+    
+    if not ffmpeg_path:
+        return jsonify({
+            "success": False,
+            "error": "FFmpeg não encontrado"
+        })
+    
+    try:
+        result = subprocess.run(
+            [ffmpeg_path, '-version'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        
+        if result.returncode == 0:
+            version_line = result.stdout.split('\n')[0]
+            version = version_line.split(' ')[2] if len(version_line.split(' ')) > 2 else "unknown"
+            
+            return jsonify({
+                "success": True,
+                "version": version,
+                "path": ffmpeg_path
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": f"FFmpeg retornou código {result.returncode}"
+            })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
+
+@app.route('/api/system-info')
+def api_system_info():
+    """Informações detalhadas do sistema"""
+    try:
+        users = load_users()
+        
+        return jsonify({
+            "version": "2.3.0",
+            "base_dir": BASE_DIR,
+            "users_count": len(users.get('users', {})),
+            "service_status": "running",
+            "uptime": str(datetime.now() - datetime.fromtimestamp(psutil.boot_time())).split('.')[0],
+            "ffmpeg": "installed" if find_ffmpeg() else "not installed",
+            "multi_upload": True,
+            "backup_enabled": True
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+# =============== ROTAS DE BACKUP ===============
+
+@app.route('/api/backup/create', methods=['POST'])
+def api_backup_create():
+    """Criar um novo backup"""
     if 'user_id' not in session:
         return jsonify({"success": False, "error": "Não autenticado"}), 401
     
-    print(f"[DEBUG] Iniciando conversão multiarquivos para usuário: {session['user_id']}")
+    backup_name = request.args.get('name', None)
+    
+    result = create_backup(backup_name)
+    
+    if result['success']:
+        log_activity(f"Usuário {session['user_id']} criou backup: {result['backup_name']}")
+    
+    return jsonify(result)
+
+@app.route('/api/backup/list')
+def api_backup_list():
+    """Listar todos os backups"""
+    if 'user_id' not in session:
+        return jsonify({"success": False, "error": "Não autenticado"}), 401
+    
+    backups = list_backups()
+    
+    return jsonify({
+        "success": True,
+        "backups": backups,
+        "count": len(backups)
+    })
+
+@app.route('/api/backup/download/<backup_name>')
+def api_backup_download(backup_name):
+    """Download de um backup"""
+    if 'user_id' not in session:
+        return "Não autenticado", 401
+    
+    backup_path = os.path.join(BACKUP_DIR, backup_name)
+    
+    if not os.path.exists(backup_path):
+        return "Backup não encontrado", 404
+    
+    log_activity(f"Usuário {session['user_id']} baixou backup: {backup_name}")
+    
+    return send_file(backup_path, as_attachment=True)
+
+@app.route('/api/backup/restore/<backup_name>', methods=['POST'])
+def api_backup_restore(backup_name):
+    """Restaurar um backup específico"""
+    if 'user_id' not in session:
+        return jsonify({"success": False, "error": "Não autenticado"}), 401
+    
+    backup_path = os.path.join(BACKUP_DIR, backup_name)
+    
+    if not os.path.exists(backup_path):
+        return jsonify({"success": False, "error": "Backup não encontrado"})
+    
+    result = restore_backup(backup_path)
+    
+    if result['success']:
+        log_activity(f"Usuário {session['user_id']} restaurou backup: {backup_name}")
+    
+    return jsonify(result)
+
+@app.route('/api/backup/upload', methods=['POST'])
+def api_backup_upload():
+    """Upload e restauração de backup"""
+    if 'user_id' not in session:
+        return jsonify({"success": False, "error": "Não autenticado"}), 401
+    
+    if 'backup' not in request.files:
+        return jsonify({"success": False, "error": "Nenhum arquivo enviado"})
+    
+    file = request.files['backup']
+    if file.filename == '':
+        return jsonify({"success": False, "error": "Nenhum arquivo selecionado"})
+    
+    if not (file.filename.endswith('.tar.gz') or file.filename.endswith('.tgz')):
+        return jsonify({"success": False, "error": "Formato inválido. Use .tar.gz"})
+    
+    temp_path = os.path.join(tempfile.gettempdir(), f"restore_{uuid.uuid4().hex}.tar.gz")
+    file.save(temp_path)
+    
+    result = restore_backup(temp_path)
+    
+    try:
+        os.remove(temp_path)
+    except:
+        pass
+    
+    if result['success']:
+        log_activity(f"Usuário {session['user_id']} restaurou sistema via upload")
+    
+    return jsonify(result)
+
+@app.route('/api/backup/delete/<backup_name>', methods=['DELETE'])
+def api_backup_delete(backup_name):
+    """Excluir um backup"""
+    if 'user_id' not in session:
+        return jsonify({"success": False, "error": "Não autenticado"}), 401
+    
+    backup_path = os.path.join(BACKUP_DIR, backup_name)
+    
+    if not os.path.exists(backup_path):
+        return jsonify({"success": False, "error": "Backup não encontrado"})
+    
+    try:
+        os.remove(backup_path)
+        log_activity(f"Usuário {session['user_id']} excluiu backup: {backup_name}")
+        
+        return jsonify({
+            "success": True,
+            "message": f"Backup {backup_name} excluído"
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
+
+@app.route('/api/backup/delete-all', methods=['DELETE'])
+def api_backup_delete_all():
+    """Excluir todos os backups"""
+    if 'user_id' not in session:
+        return jsonify({"success": False, "error": "Não autenticado"}), 401
+    
+    try:
+        deleted = 0
+        for filename in os.listdir(BACKUP_DIR):
+            if filename.endswith('.tar.gz'):
+                filepath = os.path.join(BACKUP_DIR, filename)
+                os.remove(filepath)
+                deleted += 1
+        
+        log_activity(f"Usuário {session['user_id']} excluiu todos os backups ({deleted} arquivos)")
+        
+        return jsonify({
+            "success": True,
+            "deleted": deleted,
+            "message": f"{deleted} backups excluídos"
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
+
+# =============== ROTA DE CONVERSÃO CORRIGIDA ===============
+
+@app.route('/convert-multiple', methods=['POST'])
+def convert_multiple_videos():
+    """Converter múltiplos vídeos com nome personalizado - VERSÃO CORRIGIDA"""
+    if 'user_id' not in session:
+        return jsonify({"success": False, "error": "Não autenticado"}), 401
+    
+    print(f"[DEBUG] Iniciando conversão múltipla para usuário: {session['user_id']}")
     
     try:
         ffmpeg_path = find_ffmpeg()
@@ -2679,6 +3490,17 @@ def convert_multiple_videos():
                 "success": False,
                 "error": "FFmpeg não encontrado. Execute: sudo apt-get install ffmpeg"
             })
+        
+        if 'files[]' not in request.files:
+            print("[DEBUG] Nenhum arquivo enviado")
+            return jsonify({"success": False, "error": "Nenhum arquivo enviado"})
+        
+        files = request.files.getlist('files[]')
+        print(f"[DEBUG] Arquivos recebidos: {len(files)}")
+        
+        if not files or files[0].filename == '':
+            print("[DEBUG] Nenhum arquivo selecionado")
+            return jsonify({"success": False, "error": "Nenhum arquivo selecionado"})
         
         conversion_name = request.form.get('conversion_name', '').strip()
         if not conversion_name:
@@ -2695,51 +3517,25 @@ def convert_multiple_videos():
         
         print(f"[DEBUG] Qualidades: {qualities}")
         
-        source_type = request.form.get('source_type', 'external')
-        video_paths = []
-        
-        if source_type == 'external':
-            if 'files[]' not in request.files:
-                print("[DEBUG] Nenhum arquivo externo enviado")
-                return jsonify({"success": False, "error": "Nenhum arquivo enviado"})
-            
-            files = request.files.getlist('files[]')
-            print(f"[DEBUG] Arquivos externos recebidos: {len(files)}")
-            
-            if not files or files[0].filename == '':
-                print("[DEBUG] Nenhum arquivo externo selecionado")
-                return jsonify({"success": False, "error": "Nenhum arquivo selecionado"})
-            
-            for file in files:
-                filename = sanitize_filename(file.filename)
-                temp_path = os.path.join(UPLOAD_DIR, f"temp_{uuid.uuid4().hex}_{filename}")
-                file.save(temp_path)
-                video_paths.append(temp_path)
-                
-        else:  # internal
-            video_paths_json = request.form.get('video_paths', '[]')
-            try:
-                selected_videos = json.loads(video_paths_json)
-                video_paths = [v['path'] for v in selected_videos if os.path.exists(v['path'])]
-                print(f"[DEBUG] Vídeos internos selecionados: {len(video_paths)}")
-            except Exception as e:
-                print(f"[DEBUG] Erro ao processar vídeos internos: {e}")
-                return jsonify({"success": False, "error": "Erro ao processar vídeos internos"})
-        
-        if not video_paths:
-            return jsonify({"success": False, "error": "Nenhum vídeo válido para conversão"})
+        # Ordenar arquivos se solicitado
+        files_data = [(file, file.filename) for file in files]
+        if request.form.get('keep_order', 'true') == 'true':
+            # Manter ordem de upload
+            pass
+        else:
+            # Ordenar alfabeticamente
+            files_data.sort(key=lambda x: x[1])
         
         playlist_id = str(uuid.uuid4())[:8]
         
-        update_progress(playlist_id, 0, len(video_paths), "Iniciando conversão...", "")
+        print(f"Iniciando conversão: {len(files_data)} arquivos, nome: {conversion_name}")
         
-        print(f"Iniciando conversão multiarquivos: {len(video_paths)} arquivos, nome: {conversion_name}")
-        
+        # Processar em thread
         def conversion_task():
-            return process_multiple_videos(video_paths, qualities, playlist_id, conversion_name)
+            return process_multiple_videos(files_data, qualities, playlist_id, conversion_name)
         
         future = executor.submit(conversion_task)
-        result = future.result(timeout=7200)
+        result = future.result(timeout=3600)  # Timeout de 1 hora
         
         print(f"Resultado da conversão: {result.get('success', False)}")
         
@@ -2749,12 +3545,12 @@ def convert_multiple_videos():
                 "playlist_id": playlist_id,
                 "video_id": playlist_id,
                 "conversion_name": conversion_name,
-                "filename": f"{len(video_paths)} arquivos",
+                "filename": f"{len(files_data)} arquivos",
                 "qualities": qualities,
                 "timestamp": datetime.now().isoformat(),
                 "status": "success",
                 "type": "multiple",
-                "videos_count": len(video_paths),
+                "videos_count": len(files_data),
                 "videos_converted": result.get("videos_converted", 0),
                 "m3u8_url": f"/hls/{playlist_id}/master.m3u8",
                 "player_url": f"/player/{playlist_id}",
@@ -2770,13 +3566,13 @@ def convert_multiple_videos():
             
             save_conversions(conversions)
             
-            log_activity(f"Conversão '{conversion_name}' realizada: {len(video_paths)} arquivos -> {playlist_id}")
+            log_activity(f"Conversão '{conversion_name}' realizada: {len(files_data)} arquivos -> {playlist_id}")
             
             return jsonify({
                 "success": True,
                 "playlist_id": playlist_id,
                 "conversion_name": conversion_name,
-                "videos_count": len(video_paths),
+                "videos_count": len(files_data),
                 "videos_converted": result.get("videos_converted", 0),
                 "qualities": result.get("qualities", qualities),
                 "m3u8_url": f"/hls/{playlist_id}/master.m3u8",
@@ -2803,10 +3599,10 @@ def convert_multiple_videos():
     except concurrent.futures.TimeoutError:
         return jsonify({
             "success": False,
-            "error": "Timeout: A conversão excedeu o tempo limite de 2 horas"
+            "error": "Timeout: A conversão excedeu o tempo limite de 1 hora"
         })
     except Exception as e:
-        print(f"Erro na conversão multiarquivos: {str(e)}")
+        print(f"Erro na conversão múltipla: {str(e)}")
         
         try:
             conversions = load_conversions()
@@ -2821,7 +3617,124 @@ def convert_multiple_videos():
             "error": f"Erro interno: {str(e)}"
         })
 
-# Outras rotas (player, health, etc.) permanecem as mesmas...
+@app.route('/convert', methods=['POST'])
+def convert_video():
+    """Converter um único vídeo para HLS (para compatibilidade)"""
+    if 'user_id' not in session:
+        return jsonify({"success": False, "error": "Não autenticado"}), 401
+    
+    try:
+        ffmpeg_path = find_ffmpeg()
+        if not ffmpeg_path:
+            return jsonify({
+                "success": False,
+                "error": "FFmpeg não encontrado. Execute: sudo apt-get install ffmpeg"
+            })
+        
+        if 'file' not in request.files:
+            return jsonify({"success": False, "error": "Nenhum arquivo enviado"})
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"success": False, "error": "Nenhum arquivo selecionado"})
+        
+        conversion_name = request.form.get('conversion_name', file.filename)
+        conversion_name = sanitize_filename(conversion_name)
+        
+        qualities_json = request.form.get('qualities', '["720p"]')
+        try:
+            qualities = json.loads(qualities_json)
+        except:
+            qualities = ["720p"]
+        
+        playlist_id = str(uuid.uuid4())[:8]
+        result = process_multiple_videos([(file, file.filename)], qualities, playlist_id, conversion_name)
+        
+        if result["success"]:
+            conversions = load_conversions()
+            conversion_data = {
+                "playlist_id": playlist_id,
+                "video_id": playlist_id,
+                "conversion_name": conversion_name,
+                "filename": file.filename,
+                "qualities": qualities,
+                "timestamp": datetime.now().isoformat(),
+                "status": "success",
+                "type": "single",
+                "m3u8_url": f"/hls/{playlist_id}/master.m3u8"
+            }
+            
+            if not isinstance(conversions.get('conversions'), list):
+                conversions['conversions'] = []
+            
+            conversions['conversions'].insert(0, conversion_data)
+            conversions['stats']['total'] = conversions['stats'].get('total', 0) + 1
+            conversions['stats']['success'] = conversions['stats'].get('success', 0) + 1
+            
+            save_conversions(conversions)
+            
+            log_activity(f"Conversão única realizada: {file.filename} -> {playlist_id}")
+            
+            return jsonify({
+                "success": True,
+                "video_id": playlist_id,
+                "playlist_id": playlist_id,
+                "conversion_name": conversion_name,
+                "qualities": qualities,
+                "m3u8_url": f"/hls/{playlist_id}/master.m3u8",
+                "player_url": f"/player/{playlist_id}"
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": "Erro na conversão"
+            })
+        
+    except Exception as e:
+        print(f"Erro na conversão: {e}")
+        
+        try:
+            conversions = load_conversions()
+            conversions['stats']['total'] = conversions['stats'].get('total', 0) + 1
+            conversions['stats']['failed'] = conversions['stats'].get('failed', 0) + 1
+            save_conversions(conversions)
+        except:
+            pass
+        
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
+
+@app.route('/hls/<playlist_id>/master.m3u8')
+@app.route('/hls/<playlist_id>/<quality>/index.m3u8')
+@app.route('/hls/<playlist_id>/<video_id>/<quality>/index.m3u8')
+@app.route('/hls/<playlist_id>/<path:filename>')
+def serve_hls(playlist_id, quality=None, video_id=None, filename=None):
+    """Servir arquivos HLS com estrutura corrigida"""
+    if filename is None:
+        if quality and video_id:
+            # URL: /hls/playlist_id/video_id/quality/index.m3u8
+            filepath = os.path.join(HLS_DIR, playlist_id, video_id, quality, "index.m3u8")
+        elif quality and not video_id:
+            # URL: /hls/playlist_id/quality/index.m3u8
+            filepath = os.path.join(HLS_DIR, playlist_id, quality, "index.m3u8")
+        else:
+            # URL: /hls/playlist_id/master.m3u8
+            filepath = os.path.join(HLS_DIR, playlist_id, "master.m3u8")
+    else:
+        # URL: /hls/playlist_id/.../arquivo.ts ou outro arquivo
+        filepath = os.path.join(HLS_DIR, playlist_id, filename)
+    
+    if os.path.exists(filepath):
+        return send_file(filepath)
+    
+    # Buscar em subdiretórios
+    for root, dirs, files in os.walk(os.path.join(HLS_DIR, playlist_id)):
+        if filename and filename in files:
+            return send_file(os.path.join(root, filename))
+    
+    return "Arquivo não encontrado", 404
 
 @app.route('/player/<playlist_id>')
 def player_page(playlist_id):
@@ -2973,31 +3886,27 @@ def health():
     """Health check endpoint"""
     return jsonify({
         "status": "healthy",
-        "service": "hls-converter-multifiles",
+        "service": "hls-converter-ultimate",
         "timestamp": datetime.now().isoformat(),
-        "version": "2.5.0",
+        "version": "2.3.0",
         "ffmpeg": find_ffmpeg() is not None,
         "multi_upload": True,
-        "internal_files": True,
         "backup_system": True,
         "named_conversions": True,
-        "fixed_links": True,
-        "progress_tracking": True
+        "fixed_links": True
     })
 
 # =============== INICIALIZAÇÃO ===============
 if __name__ == '__main__':
     print("=" * 60)
-    print("🚀 HLS Converter MULTIARQUIVOS - Versão 2.5.0")
+    print("🚀 HLS Converter ULTIMATE - Versão Corrigida 2.3.0")
     print("=" * 60)
     print(f"📂 Diretório base: {BASE_DIR}")
-    print(f"🎬 Vídeos internos: {INTERNAL_VIDEOS_DIR}")
     print(f"🔐 Autenticação: Habilitada")
     print(f"👤 Usuário padrão: admin / admin")
     print(f"💾 Sistema de backup: Habilitado")
     print(f"🏷️  Nome personalizado: Habilitado")
-    print(f"📊 Progresso em tempo real: SIM")
-    print(f"🔗 Links copiáveis: SIM")
+    print(f"🔗 Links corrigidos: SIM")
     print(f"🌐 Porta: 8080")
     print("=" * 60)
     
