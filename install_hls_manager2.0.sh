@@ -3414,29 +3414,29 @@ def player_page(playlist_id):
         except:
             pass
     
-    player_html = f'''
+    player_html = '''
     <!DOCTYPE html>
     <html>
     <head>
-        <title>{conversion_name} - HLS Player</title>
+        <title>''' + conversion_name + ''' - HLS Player</title>
         <link href="https://vjs.zencdn.net/7.20.3/video-js.css" rel="stylesheet">
         <style>
-            body {{ 
+            body { 
                 margin: 0; 
                 padding: 20px; 
                 background: #1a1a1a; 
                 color: white;
                 font-family: Arial, sans-serif;
-            }}
-            .player-container {{ 
+            }
+            .player-container { 
                 max-width: 1200px; 
                 margin: 0 auto; 
                 background: #2d2d2d;
                 border-radius: 10px;
                 overflow: hidden;
                 box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-            }}
-            .back-btn {{ 
+            }
+            .back-btn { 
                 background: #4361ee; 
                 color: white; 
                 border: none; 
@@ -3447,33 +3447,33 @@ def player_page(playlist_id):
                 display: inline-flex;
                 align-items: center;
                 gap: 8px;
-            }}
-            .playlist-info {{
+            }
+            .playlist-info {
                 padding: 20px;
                 background: #363636;
                 border-bottom: 1px solid #444;
-            }}
-            .videos-list {{
+            }
+            .videos-list {
                 padding: 20px;
                 max-height: 300px;
                 overflow-y: auto;
-            }}
-            .video-item {{
+            }
+            .video-item {
                 padding: 10px 15px;
                 background: #2d2d2d;
                 border-radius: 5px;
                 margin-bottom: 10px;
                 border-left: 3px solid #4361ee;
-            }}
-            .video-title {{
+            }
+            .video-title {
                 font-weight: bold;
                 color: #4cc9f0;
-            }}
-            .video-meta {{
+            }
+            .video-meta {
                 font-size: 0.9rem;
                 color: #aaa;
                 margin-top: 5px;
-            }}
+            }
         </style>
     </head>
     <body>
@@ -3483,50 +3483,62 @@ def player_page(playlist_id):
         
         <div class="player-container">
             <div class="playlist-info">
-                <h2>🎬 {conversion_name}</h2>
-                <p>Total de vídeos: {len(video_info)} | Use as setas para navegar entre os vídeos</p>
+                <h2>🎬 ''' + conversion_name + '''</h2>
+                <p>Total de vídeos: ''' + str(len(video_info)) + ''' | Use as setas para navegar entre os vídeos</p>
             </div>
             
             <video id="hlsPlayer" class="video-js vjs-default-skin" controls preload="auto" width="100%" height="500">
-                <source src="{m3u8_url}" type="application/x-mpegURL">
+                <source src="''' + m3u8_url + '''" type="application/x-mpegURL">
             </video>
-            
-            {f'''
+    '''
+    
+    if video_info:
+        player_html += '''
             <div class="videos-list">
                 <h3><i class="fas fa-list"></i> Vídeos na Playlist</h3>
-                {''.join([f'''
+        '''
+        
+        for v in video_info:
+            qualities = ', '.join(v.get("qualities", []))
+            filename = v.get("filename", "Vídeo")
+            player_html += f'''
                 <div class="video-item">
-                    <div class="video-title">{v.get("filename", "Vídeo")}</div>
+                    <div class="video-title">{filename}</div>
                     <div class="video-meta">
-                        Qualidades: {', '.join(v.get("qualities", []))}
+                        Qualidades: {qualities}
                     </div>
                 </div>
-                ''' for v in video_info])}
+            '''
+        
+        player_html += '''
             </div>
-            ''' if video_info else ''}
+        '''
+    
+    player_html += '''
         </div>
         
         <script src="https://vjs.zencdn.net/7.20.3/video.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/videojs-contrib-hls/5.15.0/videojs-contrib-hls.min.js"></script>
         <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
         <script>
-            var player = videojs('hlsPlayer', {{
-                html5: {{
-                    hls: {{
+            var player = videojs('hlsPlayer', {
+                html5: {
+                    hls: {
                         enableLowInitialPlaylist: true,
                         smoothQualityChange: true,
                         overrideNative: true
-                    }}
-                }}
-            }});
+                    }
+                }
+            });
             
-            player.ready(function() {{
+            player.ready(function() {
                 this.play();
-            }});
+            });
         </script>
     </body>
     </html>
     '''
+    
     return player_html
 
 @app.route('/health')
