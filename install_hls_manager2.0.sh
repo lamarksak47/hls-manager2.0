@@ -1,15 +1,15 @@
 #!/bin/bash
-# install_hls_converter_final_completo.sh - VERSÃO COMPLETA COM TODAS MELHORIAS
+# install_hls_converter_final_corrigido.sh - VERSÃO 2.4.0 COMPLETA COM MELHORIAS
 
 set -e
 
-echo "🚀 INSTALANDO HLS CONVERTER ULTIMATE - VERSÃO 2.4.0 COMPLETA"
+echo "🚀 INSTALANDO HLS CONVERTER ULTIMATE - VERSÃO 2.4.0"
 echo "=================================================================="
 
 # 1. Verificar privilégios
 if [ "$EUID" -ne 0 ]; then
     echo "❌ Por favor, execute como root ou com sudo!"
-    echo "   sudo ./install_hls_converter_final_completo.sh"
+    echo "   sudo ./install_hls_converter_final_corrigido.sh"
     exit 1
 fi
 
@@ -45,7 +45,7 @@ else
     echo "⚠️  Usuário hlsuser já existe"
 fi
 
-# 5. Criar estrutura de diretórios COMPLETA
+# 5. Criar estrutura de diretórios
 echo "📁 Criando estrutura de diretórios..."
 mkdir -p /opt/hls-converter/{uploads,hls,logs,db,backups,sessions,static,internal_media}
 
@@ -55,7 +55,7 @@ cd /opt/hls-converter
 python3 -m venv venv
 source venv/bin/activate
 
-# 7. Instalar dependências Python COMPLETAS
+# 7. Instalar dependências Python
 echo "📦 Instalando dependências Python..."
 pip install --upgrade pip
 pip install \
@@ -69,17 +69,18 @@ pip install \
     python-dotenv \
     werkzeug
 
-# 8. Configurar nginx COM TIMEOUTS AUMENTADOS PARA CONVERSÕES LONGAS
+# 8. Configurar nginx COM TIMEOUTS INFINITOS
 echo "🌐 Configurando nginx..."
 cat > /etc/nginx/sites-available/hls-converter << 'EOF'
 server {
     listen 80;
     server_name _;
     
-    # Aumentar tamanho máximo de upload (50GB)
+    # Timeout INFINITO para conversões longas (50GB)
     client_max_body_size 50G;
-    client_body_timeout 24h;
-    client_header_timeout 24h;
+    client_body_timeout 0;
+    client_header_timeout 0;
+    keepalive_timeout 0;
     
     # Desabilitar buffering para uploads grandes
     proxy_request_buffering off;
@@ -102,10 +103,10 @@ server {
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         
-        # Timeouts INFINITOS para conversões longas
-        proxy_connect_timeout 86400s;  # 24 horas
-        proxy_send_timeout 86400s;     # 24 horas
-        proxy_read_timeout 86400s;     # 24 horas
+        # Timeouts INFINITOS
+        proxy_connect_timeout 0;
+        proxy_send_timeout 0;
+        proxy_read_timeout 0;
         
         # Configurações adicionais
         proxy_redirect off;
@@ -134,7 +135,7 @@ server {
         deny all;
     }
     
-    location ~ /(db|sessions|backups|internal_media) {
+    location ~ /(db|sessions|backups) {
         deny all;
     }
 }
@@ -145,13 +146,13 @@ ln -sf /etc/nginx/sites-available/hls-converter /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default
 systemctl restart nginx
 
-# 9. CRIAR APLICAÇÃO FLASK COMPLETA COM TODAS MELHORIAS
-echo "💻 Criando aplicação Flask completa v2.4.0..."
+# 9. CRIAR APLICAÇÃO FLASK COMPLETA - VERSÃO 2.4.0
+echo "💻 Criando aplicação Flask versão 2.4.0..."
 
 cat > /opt/hls-converter/app.py << 'EOF'
 #!/usr/bin/env python3
 """
-HLS Converter ULTIMATE - Versão Completa 2.4.0
+HLS Converter ULTIMATE - Versão Corrigida 2.4.0
 Sistema completo com importação interna/externa, múltiplos arquivos e timeout infinito
 """
 
@@ -919,9 +920,6 @@ def process_multiple_videos_from_paths(file_paths, qualities, playlist_id, conve
         }
 
 # =============== PÁGINAS HTML ===============
-# Manter as páginas HTML do primeiro código que já estão atualizadas
-
-# Login HTML (manter igual)
 LOGIN_HTML = '''
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -1034,7 +1032,6 @@ LOGIN_HTML = '''
 </html>
 '''
 
-# Change Password HTML (manter igual)
 CHANGE_PASSWORD_HTML = '''
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -1146,9 +1143,2203 @@ CHANGE_PASSWORD_HTML = '''
 </html>
 '''
 
-# Dashboard HTML COM TODAS MELHORIAS (usar do primeiro código)
-# Como o HTML é muito longo, vou usar um placeholder e depois carregar do arquivo original
-# Por questão de espaço, vou manter apenas o essencial no comentário
+# DASHBOARD HTML com a nova funcionalidade de importação interna
+DASHBOARD_HTML = '''
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎬 HLS Converter ULTIMATE</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        :root {
+            --primary: #4361ee;
+            --secondary: #3a0ca3;
+            --accent: #4cc9f0;
+            --success: #2ecc71;
+            --danger: #e74c3c;
+            --warning: #f39c12;
+            --dark: #2c3e50;
+            --light: #ecf0f1;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            color: var(--dark);
+            line-height: 1.6;
+        }
+        
+        .header {
+            background: linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%);
+            color: white;
+            padding: 20px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .logo i {
+            font-size: 2rem;
+        }
+        
+        .logo h1 {
+            font-size: 1.8rem;
+            font-weight: 600;
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .user-info span {
+            background: rgba(255,255,255,0.2);
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-weight: 500;
+        }
+        
+        .logout-btn {
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 8px 20px;
+            border-radius: 5px;
+            text-decoration: none;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .logout-btn:hover {
+            background: rgba(255,255,255,0.3);
+            transform: translateY(-1px);
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 30px auto;
+            padding: 0 20px;
+        }
+        
+        .nav-tabs {
+            display: flex;
+            background: white;
+            border-radius: 10px;
+            padding: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+            overflow-x: auto;
+        }
+        
+        .nav-tab {
+            padding: 15px 25px;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+        
+        .nav-tab:hover {
+            background: var(--light);
+        }
+        
+        .nav-tab.active {
+            background: var(--primary);
+            color: white;
+            box-shadow: 0 4px 10px rgba(67, 97, 238, 0.3);
+        }
+        
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.5s ease;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.08);
+            border: 1px solid #eaeaea;
+        }
+        
+        .card h2 {
+            color: var(--primary);
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #f0f0f0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        /* Novos estilos para importação */
+        .import-methods {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+        
+        .import-method {
+            flex: 1;
+            min-width: 300px;
+            background: var(--light);
+            border-radius: 10px;
+            padding: 25px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 2px solid transparent;
+        }
+        
+        .import-method:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        }
+        
+        .import-method.selected {
+            border-color: var(--primary);
+            background: rgba(67, 97, 238, 0.05);
+        }
+        
+        .import-method i {
+            font-size: 3rem;
+            margin-bottom: 15px;
+            color: var(--primary);
+        }
+        
+        .import-method h3 {
+            margin-bottom: 10px;
+            color: var(--dark);
+        }
+        
+        .import-method p {
+            color: #666;
+            font-size: 0.9rem;
+        }
+        
+        .external-upload, .internal-browser {
+            display: none;
+        }
+        
+        .external-upload.active, .internal-browser.active {
+            display: block;
+            animation: fadeIn 0.5s ease;
+        }
+        
+        .internal-file-list {
+            max-height: 400px;
+            overflow-y: auto;
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 20px;
+            border: 1px solid #ddd;
+        }
+        
+        .internal-file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 15px;
+            background: white;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            border-left: 4px solid #4cc9f0;
+        }
+        
+        .internal-file-info {
+            flex: 1;
+        }
+        
+        .internal-file-name {
+            font-weight: 600;
+            color: var(--dark);
+        }
+        
+        .internal-file-meta {
+            font-size: 0.8rem;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        /* Resto dos estilos mantidos igual... */
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .stat-item {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 25px;
+            border-radius: 10px;
+            text-align: center;
+            transition: transform 0.3s;
+        }
+        
+        .stat-item:hover {
+            transform: translateY(-5px);
+        }
+        
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            color: #6c757d;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .upload-area {
+            border: 3px dashed var(--primary);
+            border-radius: 12px;
+            padding: 60px 30px;
+            text-align: center;
+            margin: 30px 0;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: rgba(67, 97, 238, 0.02);
+        }
+        
+        .upload-area:hover {
+            background: rgba(67, 97, 238, 0.05);
+            border-color: var(--secondary);
+            transform: translateY(-2px);
+        }
+        
+        .upload-area i {
+            font-size: 4rem;
+            color: var(--primary);
+            margin-bottom: 20px;
+        }
+        
+        .upload-area h3 {
+            color: var(--dark);
+            margin-bottom: 10px;
+        }
+        
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(67, 97, 238, 0.3);
+        }
+        
+        .btn-success {
+            background: linear-gradient(90deg, var(--success) 0%, #27ae60 100%);
+            color: white;
+        }
+        
+        .btn-warning {
+            background: linear-gradient(90deg, var(--warning) 0%, #e67e22 100%);
+            color: white;
+        }
+        
+        .btn-danger {
+            background: linear-gradient(90deg, var(--danger) 0%, #c0392b 100%);
+            color: white;
+        }
+        
+        .conversions-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .conversion-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            border-left: 4px solid var(--accent);
+            transition: transform 0.3s;
+        }
+        
+        .conversion-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.12);
+        }
+        
+        .conversion-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .conversion-id {
+            font-family: monospace;
+            background: var(--light);
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 0.9rem;
+        }
+        
+        .conversion-status {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .conversion-info {
+            margin: 10px 0;
+        }
+        
+        .conversion-info p {
+            margin: 5px 0;
+            font-size: 0.9rem;
+        }
+        
+        .conversion-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .conversion-actions .btn {
+            padding: 8px 15px;
+            font-size: 0.85rem;
+            flex: 1;
+        }
+        
+        .progress-container {
+            background: #e9ecef;
+            border-radius: 10px;
+            height: 20px;
+            overflow: hidden;
+            margin: 20px 0;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent) 0%, var(--primary) 100%);
+            transition: width 0.5s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        
+        .quality-selector {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .quality-option {
+            background: var(--light);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 2px solid transparent;
+        }
+        
+        .quality-option:hover {
+            background: #e3e6ea;
+        }
+        
+        .quality-option.selected {
+            background: var(--primary);
+            color: white;
+            border-color: var(--secondary);
+        }
+        
+        .file-info {
+            background: var(--light);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            display: none;
+        }
+        
+        .file-info.show {
+            display: block;
+            animation: fadeIn 0.5s ease;
+        }
+        
+        .ffmpeg-status {
+            display: inline-block;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-weight: 600;
+            margin: 10px 0;
+        }
+        
+        .ffmpeg-ok {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .ffmpeg-error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+        
+        .empty-state i {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            color: #dee2e6;
+        }
+        
+        .system-status {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 12px;
+            margin-top: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .header {
+                flex-direction: column;
+                gap: 15px;
+                text-align: center;
+            }
+            
+            .nav-tabs {
+                flex-wrap: wrap;
+            }
+            
+            .nav-tab {
+                flex: 1;
+                min-width: 120px;
+                justify-content: center;
+            }
+            
+            .import-methods {
+                flex-direction: column;
+            }
+            
+            .import-method {
+                min-width: 100%;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .conversions-list {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: white;
+            padding: 15px 25px;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            z-index: 1000;
+            animation: slideIn 0.3s ease;
+            border-left: 4px solid var(--primary);
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        .toast.success {
+            border-left-color: var(--success);
+        }
+        
+        .toast.error {
+            border-left-color: var(--danger);
+        }
+        
+        .toast.warning {
+            border-left-color: var(--warning);
+        }
+        
+        /* Estilos para multi-upload */
+        .selected-files {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .file-list {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            background: white;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            border: 1px solid #eaeaea;
+        }
+        
+        .file-item .file-name {
+            flex: 1;
+            font-weight: 500;
+        }
+        
+        .file-item .file-size {
+            color: #6c757d;
+            margin: 0 15px;
+        }
+        
+        .file-item .remove-file {
+            color: #e74c3c;
+            cursor: pointer;
+            background: none;
+            border: none;
+            font-size: 1.2rem;
+        }
+        
+        .upload-count {
+            background: var(--primary);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            margin-left: 10px;
+        }
+        
+        .processing-details {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            display: none;
+        }
+        
+        .processing-details.show {
+            display: block;
+        }
+        
+        .current-file {
+            font-weight: 600;
+            color: var(--primary);
+        }
+        
+        /* Estilos para campo de nome */
+        .conversion-name-input {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #4361ee;
+            border-radius: 10px;
+            font-size: 16px;
+            margin: 20px 0;
+            transition: all 0.3s;
+            background: #f8f9fa;
+        }
+        
+        .conversion-name-input:focus {
+            outline: none;
+            border-color: #3a0ca3;
+            box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.1);
+            background: white;
+        }
+        
+        /* Estilos para backup */
+        .backup-section {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+        
+        .backup-list {
+            max-height: 300px;
+            overflow-y: auto;
+            margin: 15px 0;
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            border: 1px solid #ddd;
+        }
+        
+        .backup-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .backup-item:last-child {
+            border-bottom: none;
+        }
+        
+        .backup-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .btn-backup {
+            background: linear-gradient(90deg, #2ecc71 0%, #27ae60 100%);
+            color: white;
+        }
+        
+        .btn-restore {
+            background: linear-gradient(90deg, #3498db 0%, #2980b9 100%);
+            color: white;
+        }
+        
+        /* Estilos para links gerados */
+        .links-container {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+            display: none;
+        }
+        
+        .links-container.show {
+            display: block;
+            animation: fadeIn 0.5s ease;
+        }
+        
+        .link-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 15px;
+            background: white;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border-left: 4px solid #4361ee;
+        }
+        
+        .link-info {
+            flex: 1;
+        }
+        
+        .link-title {
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        .link-url {
+            color: #666;
+            font-size: 0.9rem;
+            word-break: break-all;
+        }
+        
+        .link-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 0.8rem;
+        }
+        
+        /* Estilos para links de vídeos individuais */
+        .video-links {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f0f8ff;
+            border-radius: 5px;
+            border-left: 3px solid #4cc9f0;
+        }
+        
+        .video-link-item {
+            margin: 5px 0;
+            padding: 8px;
+            background: white;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+        
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px;
+            border-radius: 5px;
+            transition: background 0.3s;
+        }
+        
+        .checkbox-item:hover {
+            background: #f0f0f0;
+        }
+        
+        .checkbox-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+        
+        .refresh-btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">
+            <i class="fas fa-video"></i>
+            <h1>HLS Converter ULTIMATE v2.4</h1>
+        </div>
+        <div class="user-info">
+            <span><i class="fas fa-user"></i> {{ session.user_id }}</span>
+            <a href="/logout" class="logout-btn">
+                <i class="fas fa-sign-out-alt"></i> Sair
+            </a>
+        </div>
+    </div>
+    
+    <div class="container">
+        <!-- Navegação -->
+        <div class="nav-tabs">
+            <div class="nav-tab active" onclick="showTab('dashboard')">
+                <i class="fas fa-tachometer-alt"></i> Dashboard
+            </div>
+            <div class="nav-tab" onclick="showTab('upload')">
+                <i class="fas fa-upload"></i> Upload
+            </div>
+            <div class="nav-tab" onclick="showTab('conversions')">
+                <i class="fas fa-history"></i> Histórico
+            </div>
+            <div class="nav-tab" onclick="showTab('settings')">
+                <i class="fas fa-cog"></i> Configurações
+            </div>
+            <div class="nav-tab" onclick="showTab('backup')">
+                <i class="fas fa-database"></i> Backup
+            </div>
+        </div>
+        
+        <!-- Dashboard Tab -->
+        <div id="dashboard" class="tab-content active">
+            <div class="card">
+                <h2><i class="fas fa-tachometer-alt"></i> Status do Sistema</h2>
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <div class="stat-value" id="cpu">--%</div>
+                        <div class="stat-label">Uso de CPU</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="memory">--%</div>
+                        <div class="stat-label">Uso de Memória</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="conversionsTotal">0</div>
+                        <div class="stat-label">Total de Conversões</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="conversionsSuccess">0</div>
+                        <div class="stat-label">Conversões Bem-sucedidas</div>
+                    </div>
+                </div>
+                
+                <div class="system-status">
+                    <h3><i class="fas fa-microchip"></i> Status do FFmpeg</h3>
+                    <div id="ffmpegStatus" class="ffmpeg-status">Verificando...</div>
+                    <p id="ffmpegPath" style="margin-top: 10px; font-size: 0.9rem;"></p>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2><i class="fas fa-bolt"></i> Ações Rápidas</h2>
+                <div style="display: flex; gap: 15px; margin-top: 20px; flex-wrap: wrap;">
+                    <button class="btn btn-primary" onclick="showTab('upload')">
+                        <i class="fas fa-upload"></i> Converter Vídeos
+                    </button>
+                    <button class="btn btn-success" onclick="refreshStats()">
+                        <i class="fas fa-sync-alt"></i> Atualizar Status
+                    </button>
+                    <button class="btn btn-warning" onclick="testFFmpeg()">
+                        <i class="fas fa-video"></i> Testar FFmpeg
+                    </button>
+                    <button class="btn btn-danger" onclick="cleanupFiles()">
+                        <i class="fas fa-trash"></i> Limpar Arquivos
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Upload Tab COM NOVAS OPÇÕES -->
+        <div id="upload" class="tab-content">
+            <div class="card">
+                <h2><i class="fas fa-upload"></i> Converter Múltiplos Vídeos para HLS</h2>
+                <p style="color: #666; margin-bottom: 20px;">
+                    Escolha como deseja importar os vídeos: por upload externo ou seleção interna.
+                </p>
+                
+                <!-- Métodos de Importação -->
+                <div class="import-methods">
+                    <div class="import-method selected" onclick="selectImportMethod('external')">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        <h3>Upload Externo</h3>
+                        <p>Faça upload de vídeos do seu computador</p>
+                    </div>
+                    <div class="import-method" onclick="selectImportMethod('internal')">
+                        <i class="fas fa-folder-open"></i>
+                        <h3>Arquivos Internos</h3>
+                        <p>Selecione vídeos já existentes no servidor</p>
+                    </div>
+                </div>
+                
+                <!-- Campo de nome da conversão -->
+                <div style="margin-bottom: 20px;">
+                    <h3><i class="fas fa-font"></i> Nome da Conversão</h3>
+                    <input type="text" 
+                           id="conversionName" 
+                           class="conversion-name-input" 
+                           placeholder="Digite um nome para esta conversão (ex: Aula de Matemática, Evento Corporativo, etc.)"
+                           maxlength="100"
+                           required>
+                    <p style="color: #666; font-size: 0.9rem; margin-top: 5px;">
+                        Este nome será usado para identificar sua conversão no histórico e nos links gerados
+                    </p>
+                </div>
+                
+                <!-- UPLOAD EXTERNO -->
+                <div id="externalUpload" class="external-upload active">
+                    <h3><i class="fas fa-cloud-upload-alt"></i> Upload de Arquivos Externos</h3>
+                    <div class="upload-area" onclick="document.getElementById('fileInput').click()">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        <h3>Arraste e solte seus vídeos aqui</h3>
+                        <p>ou clique para selecionar múltiplos arquivos (Ctrl + Click)</p>
+                        <p style="color: #666; margin-top: 10px;">
+                            Formatos suportados: MP4, AVI, MOV, MKV, WEBM, FLV, WMV, M4V, MPG, MPEG
+                        </p>
+                    </div>
+                    
+                    <input type="file" id="fileInput" accept="video/*" multiple style="display: none;" onchange="handleFileSelect()">
+                    
+                    <div id="selectedFiles" class="selected-files" style="display: none;">
+                        <h4><i class="fas fa-file-video"></i> Arquivos Selecionados <span id="fileCount" class="upload-count">0</span></h4>
+                        <ul id="fileList" class="file-list"></ul>
+                    </div>
+                </div>
+                
+                <!-- BROWSE INTERNO -->
+                <div id="internalBrowser" class="internal-browser">
+                    <h3><i class="fas fa-folder-open"></i> Selecionar Arquivos Internos</h3>
+                    <button class="refresh-btn" onclick="loadInternalFiles()">
+                        <i class="fas fa-sync-alt"></i> Atualizar Lista
+                    </button>
+                    
+                    <div id="internalFilesList" class="internal-file-list">
+                        <div class="empty-state">
+                            <i class="fas fa-folder-open"></i>
+                            <p>Carregando arquivos internos...</p>
+                        </div>
+                    </div>
+                    
+                    <div id="selectedInternalFiles" class="selected-files" style="display: none; margin-top: 20px;">
+                        <h4><i class="fas fa-check-circle"></i> Arquivos Internos Selecionados <span id="internalFileCount" class="upload-count">0</span></h4>
+                        <ul id="internalSelectedList" class="file-list"></ul>
+                    </div>
+                </div>
+                
+                <!-- Qualidades (comum a ambos) -->
+                <div style="margin-top: 30px;">
+                    <h3><i class="fas fa-layer-group"></i> Qualidades de Saída</h3>
+                    <div class="quality-selector">
+                        <div class="quality-option selected" data-quality="240p" onclick="toggleQuality(this)">
+                            240p
+                        </div>
+                        <div class="quality-option selected" data-quality="480p" onclick="toggleQuality(this)">
+                            480p
+                        </div>
+                        <div class="quality-option selected" data-quality="720p" onclick="toggleQuality(this)">
+                            720p
+                        </div>
+                        <div class="quality-option selected" data-quality="1080p" onclick="toggleQuality(this)">
+                            1080p
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Opções de processamento -->
+                <div style="margin-top: 20px;">
+                    <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                        <input type="checkbox" id="keepOrder" checked>
+                        Manter ordem dos arquivos
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 10px;">
+                        <input type="checkbox" id="continueSegments" checked>
+                        Continuar sequência de segmentos (para múltiplos vídeos)
+                    </label>
+                </div>
+                
+                <!-- Botão de conversão -->
+                <button class="btn btn-primary" onclick="startConversion()" id="convertBtn" style="margin-top: 30px; width: 100%;">
+                    <i class="fas fa-play-circle"></i> Iniciar Conversão em Lote
+                </button>
+                
+                <!-- Detalhes do processamento -->
+                <div id="processingDetails" class="processing-details">
+                    <h4><i class="fas fa-tasks"></i> Processando:</h4>
+                    <p>Arquivo atual: <span id="currentFileName" class="current-file"></span></p>
+                    <p>Progresso: <span id="currentFileProgress">0</span>/<span id="totalFiles">0</span></p>
+                </div>
+                
+                <!-- Barra de progresso -->
+                <div id="progress" style="display: none; margin-top: 30px;">
+                    <h3><i class="fas fa-spinner fa-spin"></i> Progresso da Conversão</h3>
+                    <div class="progress-container">
+                        <div class="progress-bar" id="progressBar" style="width: 0%">0%</div>
+                    </div>
+                    <p id="progressText" style="text-align: center; margin-top: 10px; color: #666;">
+                        Iniciando conversão em lote...
+                    </p>
+                </div>
+                
+                <!-- Container para exibir links gerados -->
+                <div id="linksContainer" class="links-container">
+                    <h3><i class="fas fa-link"></i> Links Gerados</h3>
+                    <div id="linksList"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Conversions Tab -->
+        <div id="conversions" class="tab-content">
+            <div class="card">
+                <h2><i class="fas fa-history"></i> Histórico de Conversões</h2>
+                
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <div>
+                        <button class="btn btn-success" onclick="loadConversions()">
+                            <i class="fas fa-sync-alt"></i> Atualizar
+                        </button>
+                        <button class="btn btn-warning" onclick="clearHistory()">
+                            <i class="fas fa-trash-alt"></i> Limpar Histórico
+                        </button>
+                    </div>
+                    <div id="conversionStats" style="color: #666; font-size: 0.9rem;">
+                        Carregando estatísticas...
+                    </div>
+                </div>
+                
+                <div id="conversionsList">
+                    <div class="empty-state">
+                        <i class="fas fa-history"></i>
+                        <h3>Nenhuma conversão realizada ainda</h3>
+                        <p>Converta seu primeiro vídeo para ver o histórico aqui</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Settings Tab -->
+        <div id="settings" class="tab-content">
+            <div class="card">
+                <h2><i class="fas fa-cog"></i> Configurações do Sistema</h2>
+                
+                <div style="margin-top: 20px;">
+                    <h3><i class="fas fa-user-shield"></i> Segurança</h3>
+                    <button class="btn btn-primary" onclick="changePassword()" style="margin-top: 10px;">
+                        <i class="fas fa-key"></i> Alterar Minha Senha
+                    </button>
+                </div>
+                
+                <div style="margin-top: 30px;">
+                    <h3><i class="fas fa-hdd"></i> Armazenamento</h3>
+                    <div style="margin: 15px 0;">
+                        <label style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="keepOriginals" checked>
+                            Manter arquivos originais após conversão
+                        </label>
+                    </div>
+                    <button class="btn btn-warning" onclick="cleanupOldFiles()" style="margin-top: 10px;">
+                        <i class="fas fa-broom"></i> Limpar Arquivos Antigos
+                    </button>
+                </div>
+                
+                <div style="margin-top: 30px;">
+                    <h3><i class="fas fa-info-circle"></i> Informações do Sistema</h3>
+                    <div id="systemInfo" style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px;">
+                        Carregando informações...
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Backup Tab -->
+        <div id="backup" class="tab-content">
+            <div class="card">
+                <h2><i class="fas fa-database"></i> Sistema de Backup</h2>
+                
+                <!-- Criar Backup -->
+                <div class="backup-section">
+                    <h3><i class="fas fa-plus-circle"></i> Criar Novo Backup</h3>
+                    <p style="color: #666; margin-bottom: 15px;">
+                        Crie um backup completo do sistema incluindo usuários, configurações e histórico.
+                    </p>
+                    
+                    <div style="display: flex; gap: 15px; align-items: center; margin-top: 20px;">
+                        <input type="text" 
+                               id="backupName" 
+                               placeholder="Nome do backup (opcional)" 
+                               style="flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 5px;">
+                        <button class="btn btn-backup" onclick="createBackup()">
+                            <i class="fas fa-save"></i> Criar Backup
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Lista de Backups -->
+                <div class="backup-section" style="margin-top: 30px;">
+                    <h3><i class="fas fa-history"></i> Backups Existentes</h3>
+                    <p style="color: #666; margin-bottom: 15px;">
+                        Gerencie seus backups existentes.
+                    </p>
+                    
+                    <div id="backupsList" class="backup-list">
+                        <div class="empty-state">
+                            <i class="fas fa-database"></i>
+                            <p>Nenhum backup encontrado</p>
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; gap: 10px; margin-top: 20px;">
+                        <button class="btn btn-backup" onclick="loadBackups()">
+                            <i class="fas fa-sync-alt"></i> Atualizar Lista
+                        </button>
+                        <button class="btn btn-danger" onclick="deleteAllBackups()">
+                            <i class="fas fa-trash-alt"></i> Limpar Tudo
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Restaurar Backup -->
+                <div class="backup-section" style="margin-top: 30px;">
+                    <h3><i class="fas fa-upload"></i> Restaurar Backup</h3>
+                    <p style="color: #666; margin-bottom: 15px;">
+                        Restaure o sistema a partir de um arquivo de backup.
+                    </p>
+                    
+                    <div style="margin-top: 20px;">
+                        <div class="upload-area" onclick="document.getElementById('restoreFile').click()">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                            <h3>Arraste e solte o arquivo de backup aqui</h3>
+                            <p>ou clique para selecionar (formato .tar.gz)</p>
+                        </div>
+                        <input type="file" id="restoreFile" accept=".tar.gz,.tgz" style="display: none;" onchange="handleRestoreFile()">
+                        
+                        <div id="selectedBackupFile" style="display: none; margin-top: 15px;">
+                            <div class="file-item">
+                                <span class="file-name" id="backupFileName"></span>
+                                <button class="remove-file" onclick="removeRestoreFile()">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <button class="btn btn-restore" onclick="restoreBackup()" id="restoreBtn" style="margin-top: 20px; width: 100%;">
+                            <i class="fas fa-upload"></i> Restaurar Sistema
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Variáveis globais
+        let selectedFiles = [];
+        let selectedInternalFiles = [];
+        let selectedQualities = ['240p', '480p', '720p', '1080p'];
+        let restoreFileData = null;
+        let currentImportMethod = 'external';
+        
+        // =============== FUNÇÕES DE NAVEGAÇÃO ===============
+        function showTab(tabName) {
+            // Esconder todas as abas
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Remover active de todas as tabs
+            document.querySelectorAll('.nav-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Mostrar aba selecionada
+            document.getElementById(tabName).classList.add('active');
+            
+            // Ativar tab correspondente
+            document.querySelectorAll('.nav-tab').forEach(tab => {
+                if (tab.textContent.includes(getTabLabel(tabName))) {
+                    tab.classList.add('active');
+                }
+            });
+            
+            // Carregar dados específicos da aba
+            switch(tabName) {
+                case 'dashboard':
+                    loadSystemStats();
+                    break;
+                case 'upload':
+                    if (currentImportMethod === 'internal') {
+                        loadInternalFiles();
+                    }
+                    break;
+                case 'conversions':
+                    loadConversions();
+                    break;
+                case 'settings':
+                    loadSystemInfo();
+                    break;
+                case 'backup':
+                    loadBackups();
+                    break;
+            }
+        }
+        
+        function getTabLabel(tabName) {
+            const labels = {
+                'dashboard': 'Dashboard',
+                'upload': 'Upload',
+                'conversions': 'Histórico',
+                'settings': 'Configurações',
+                'backup': 'Backup'
+            };
+            return labels[tabName];
+        }
+        
+        // =============== MÉTODOS DE IMPORTAÇÃO ===============
+        function selectImportMethod(method) {
+            currentImportMethod = method;
+            
+            // Atualizar UI
+            document.querySelectorAll('.import-method').forEach(el => {
+                el.classList.remove('selected');
+            });
+            
+            if (method === 'external') {
+                document.querySelector('.import-method:nth-child(1)').classList.add('selected');
+                document.getElementById('externalUpload').classList.add('active');
+                document.getElementById('internalBrowser').classList.remove('active');
+            } else {
+                document.querySelector('.import-method:nth-child(2)').classList.add('selected');
+                document.getElementById('externalUpload').classList.remove('active');
+                document.getElementById('internalBrowser').classList.add('active');
+                loadInternalFiles();
+            }
+        }
+        
+        // =============== UPLOAD EXTERNO ===============
+        function handleFileSelect() {
+            const fileInput = document.getElementById('fileInput');
+            if (fileInput.files.length > 0) {
+                Array.from(fileInput.files).forEach(file => {
+                    // Evitar duplicados
+                    if (!selectedFiles.some(f => f.name === file.name && f.size === file.size)) {
+                        selectedFiles.push(file);
+                    }
+                });
+                
+                updateExternalFileList();
+                
+                const selectedFilesDiv = document.getElementById('selectedFiles');
+                selectedFilesDiv.style.display = 'block';
+            }
+        }
+        
+        function updateExternalFileList() {
+            const fileList = document.getElementById('fileList');
+            const fileCount = document.getElementById('fileCount');
+            
+            fileList.innerHTML = '';
+            fileCount.textContent = selectedFiles.length;
+            
+            selectedFiles.forEach((file, index) => {
+                const li = document.createElement('li');
+                li.className = 'file-item';
+                li.innerHTML = `
+                    <span class="file-name">${file.name}</span>
+                    <span class="file-size">${formatBytes(file.size)}</span>
+                    <button class="remove-file" onclick="removeExternalFile(${index})">
+                        <i class="fas fa-times"></i>
+                    </button>
+                `;
+                fileList.appendChild(li);
+            });
+        }
+        
+        function removeExternalFile(index) {
+            selectedFiles.splice(index, 1);
+            updateExternalFileList();
+            
+            if (selectedFiles.length === 0) {
+                document.getElementById('selectedFiles').style.display = 'none';
+            }
+        }
+        
+        // =============== ARQUIVOS INTERNOS ===============
+        function loadInternalFiles() {
+            fetch('/api/internal-media')
+                .then(response => response.json())
+                .then(data => {
+                    const container = document.getElementById('internalFilesList');
+                    
+                    if (!data.files || data.files.length === 0) {
+                        container.innerHTML = `
+                            <div class="empty-state">
+                                <i class="fas fa-folder-open"></i>
+                                <p>Nenhum arquivo de vídeo encontrado no diretório interno</p>
+                                <small>Coloque seus vídeos em /opt/hls-converter/internal_media/</small>
+                            </div>
+                        `;
+                        return;
+                    }
+                    
+                    let html = '';
+                    data.files.forEach((file, index) => {
+                        html += `
+                            <div class="checkbox-item">
+                                <input type="checkbox" 
+                                       id="internal-file-${index}" 
+                                       data-index="${index}"
+                                       onchange="toggleInternalFile(this, '${file.name}', '${file.path}', ${file.size})">
+                                <div class="internal-file-item">
+                                    <div class="internal-file-info">
+                                        <div class="internal-file-name">${file.name}</div>
+                                        <div class="internal-file-meta">
+                                            ${formatBytes(file.size)} • ${formatDate(file.modified)}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    container.innerHTML = html;
+                })
+                .catch(error => {
+                    console.error('Erro ao carregar arquivos internos:', error);
+                    document.getElementById('internalFilesList').innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <p>Erro ao carregar arquivos internos</p>
+                        </div>
+                    `;
+                });
+        }
+        
+        function toggleInternalFile(checkbox, name, path, size) {
+            const index = parseInt(checkbox.dataset.index);
+            
+            if (checkbox.checked) {
+                if (!selectedInternalFiles.some(f => f.path === path)) {
+                    selectedInternalFiles.push({
+                        name: name,
+                        path: path,
+                        size: size,
+                        index: index
+                    });
+                }
+            } else {
+                selectedInternalFiles = selectedInternalFiles.filter(f => f.path !== path);
+            }
+            
+            updateInternalSelectedList();
+        }
+        
+        function updateInternalSelectedList() {
+            const container = document.getElementById('selectedInternalFiles');
+            const list = document.getElementById('internalSelectedList');
+            const count = document.getElementById('internalFileCount');
+            
+            list.innerHTML = '';
+            count.textContent = selectedInternalFiles.length;
+            
+            if (selectedInternalFiles.length > 0) {
+                container.style.display = 'block';
+                
+                selectedInternalFiles.forEach((file, index) => {
+                    const li = document.createElement('li');
+                    li.className = 'file-item';
+                    li.innerHTML = `
+                        <span class="file-name">${file.name}</span>
+                        <span class="file-size">${formatBytes(file.size)}</span>
+                        <button class="remove-file" onclick="removeInternalFile('${file.path}')">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    `;
+                    list.appendChild(li);
+                });
+            } else {
+                container.style.display = 'none';
+            }
+        }
+        
+        function removeInternalFile(path) {
+            selectedInternalFiles = selectedInternalFiles.filter(f => f.path !== path);
+            
+            // Desmarcar o checkbox correspondente
+            const checkbox = document.querySelector(`input[data-path="${path}"]`);
+            if (checkbox) {
+                checkbox.checked = false;
+            }
+            
+            updateInternalSelectedList();
+        }
+        
+        // =============== FUNÇÕES COMUNS ===============
+        function toggleQuality(element) {
+            const quality = element.getAttribute('data-quality');
+            const index = selectedQualities.indexOf(quality);
+            
+            if (index === -1) {
+                selectedQualities.push(quality);
+                element.classList.add('selected');
+            } else {
+                selectedQualities.splice(index, 1);
+                element.classList.remove('selected');
+            }
+        }
+        
+        // FUNÇÃO PRINCIPAL CORRIGIDA
+        function startConversion() {
+            // Verificar nome da conversão
+            const conversionName = document.getElementById('conversionName').value.trim();
+            if (!conversionName) {
+                showToast('Por favor, digite um nome para a conversão', 'warning');
+                document.getElementById('conversionName').focus();
+                return;
+            }
+            
+            // Verificar método selecionado
+            let filesToConvert = [];
+            
+            if (currentImportMethod === 'external') {
+                if (selectedFiles.length === 0) {
+                    showToast('Por favor, selecione pelo menos um arquivo!', 'warning');
+                    return;
+                }
+                filesToConvert = selectedFiles;
+            } else {
+                if (selectedInternalFiles.length === 0) {
+                    showToast('Por favor, selecione pelo menos um arquivo interno!', 'warning');
+                    return;
+                }
+                // Para arquivos internos, enviaremos os caminhos
+                filesToConvert = selectedInternalFiles;
+            }
+            
+            if (selectedQualities.length === 0) {
+                showToast('Selecione pelo menos uma qualidade!', 'warning');
+                return;
+            }
+            
+            const formData = new FormData();
+            
+            if (currentImportMethod === 'external') {
+                // Upload externo: adicionar arquivos
+                selectedFiles.forEach(file => {
+                    formData.append('files[]', file);
+                });
+                formData.append('source', 'upload');
+            } else {
+                // Arquivos internos: adicionar caminhos
+                const filePaths = selectedInternalFiles.map(f => f.path);
+                formData.append('file_paths', JSON.stringify(filePaths));
+                formData.append('source', 'internal');
+            }
+            
+            formData.append('qualities', JSON.stringify(selectedQualities));
+            formData.append('keep_order', document.getElementById('keepOrder').checked);
+            formData.append('continue_segments', document.getElementById('continueSegments').checked);
+            formData.append('conversion_name', conversionName);
+            
+            // Mostrar progresso
+            const progressSection = document.getElementById('progress');
+            const processingDetails = document.getElementById('processingDetails');
+            
+            progressSection.style.display = 'block';
+            processingDetails.classList.add('show');
+            
+            const convertBtn = document.getElementById('convertBtn');
+            const originalBtnText = convertBtn.innerHTML;
+            convertBtn.disabled = true;
+            convertBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Convertendo...';
+            
+            // Atualizar detalhes do processamento
+            const totalFiles = currentImportMethod === 'external' ? selectedFiles.length : selectedInternalFiles.length;
+            document.getElementById('totalFiles').textContent = totalFiles;
+            document.getElementById('currentFileName').textContent = currentImportMethod === 'external' ? 
+                selectedFiles[0].name : selectedInternalFiles[0].name;
+            document.getElementById('currentFileProgress').textContent = '0';
+            
+            // Atualizar progresso inicial
+            updateProgress(0, 'Iniciando conversão...');
+            
+            // REQUISIÇÃO COM TIMEOUT INFINITO
+            fetch('/convert-multiple', {
+                method: 'POST',
+                body: formData,
+                // Timeout infinito para conversões longas
+                signal: AbortSignal.timeout(24 * 60 * 60 * 1000) // 24 horas
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`Erro HTTP ${response.status}: ${response.statusText}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Resposta da conversão:', data);
+                
+                if (data.success) {
+                    updateProgress(100, 'Concluído!');
+                    
+                    // Mostrar links gerados
+                    showConversionLinks(data);
+                    
+                    showToast(`✅ "${conversionName}" convertido com sucesso!`, 'success');
+                    
+                    // Reset após 5 segundos
+                    setTimeout(() => {
+                        progressSection.style.display = 'none';
+                        processingDetails.classList.remove('show');
+                        convertBtn.disabled = false;
+                        convertBtn.innerHTML = originalBtnText;
+                        updateProgress(0, '');
+                        
+                        // Limpar seleções
+                        if (currentImportMethod === 'external') {
+                            document.getElementById('selectedFiles').style.display = 'none';
+                            document.getElementById('fileInput').value = '';
+                            selectedFiles = [];
+                        } else {
+                            document.getElementById('selectedInternalFiles').style.display = 'none';
+                            selectedInternalFiles = [];
+                            // Desmarcar todos os checkboxes
+                            document.querySelectorAll('#internalFilesList input[type="checkbox"]').forEach(cb => {
+                                cb.checked = false;
+                            });
+                        }
+                        
+                        // Atualizar histórico
+                        loadConversions();
+                        loadSystemStats();
+                    }, 5000);
+                } else {
+                    const errorMsg = data.error || 'Erro desconhecido na conversão';
+                    showToast(`❌ Erro: ${errorMsg}`, 'error');
+                    convertBtn.disabled = false;
+                    convertBtn.innerHTML = originalBtnText;
+                }
+            })
+            .catch(error => {
+                console.error('Erro na conversão:', error);
+                showToast(`❌ Erro: ${error.message || 'Servidor não respondeu'}`, 'error');
+                convertBtn.disabled = false;
+                convertBtn.innerHTML = originalBtnText;
+            });
+        }
+        
+        function updateProgress(percent, text) {
+            const progressBar = document.getElementById('progressBar');
+            progressBar.style.width = percent + '%';
+            progressBar.textContent = percent + '%';
+            document.getElementById('progressText').textContent = text;
+        }
+        
+        function showConversionLinks(data) {
+            const linksContainer = document.getElementById('linksContainer');
+            const linksList = document.getElementById('linksList');
+            
+            const baseUrl = window.location.origin;
+            let html = '';
+            
+            // Link principal da playlist master
+            html += `
+                <div class="link-item">
+                    <div class="link-info">
+                        <div class="link-title">Master Playlist - ${data.conversion_name}</div>
+                        <div class="link-url">${baseUrl}/hls/${data.playlist_id}/master.m3u8</div>
+                        <small style="color: #666;">Playlist principal com todas as qualidades</small>
+                    </div>
+                    <div class="link-actions">
+                        <button class="btn btn-primary btn-sm" onclick="copyToClipboard('${baseUrl}/hls/${data.playlist_id}/master.m3u8')">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                        <button class="btn btn-success btn-sm" onclick="window.open('/player/${data.playlist_id}', '_blank')">
+                            <i class="fas fa-play"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            // Links para cada qualidade
+            if (data.quality_links) {
+                for (const [quality, path] of Object.entries(data.quality_links)) {
+                    const fullUrl = `${baseUrl}${path}`;
+                    html += `
+                        <div class="link-item">
+                            <div class="link-info">
+                                <div class="link-title">${quality} - ${data.conversion_name}</div>
+                                <div class="link-url">${fullUrl}</div>
+                                <small style="color: #666;">Playlist específica para qualidade ${quality}</small>
+                            </div>
+                            <div class="link-actions">
+                                <button class="btn btn-primary btn-sm" onclick="copyToClipboard('${fullUrl}')">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+            
+            // Links para vídeos individuais (se existirem)
+            if (data.video_links && data.video_links.length > 0) {
+                html += `<div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #ddd;">
+                    <h4><i class="fas fa-file-video"></i> Links para Vídeos Individuais:</h4>`;
+                
+                data.video_links.forEach(video => {
+                    html += `<div class="video-links">`;
+                    html += `<div><strong>${video.filename}</strong></div>`;
+                    for (const [quality, path] of Object.entries(video.links)) {
+                        const fullUrl = `${baseUrl}/hls/${path}`;
+                        html += `
+                            <div class="video-link-item">
+                                ${quality}: ${fullUrl}
+                                <button class="btn btn-primary btn-sm" style="margin-left: 10px; padding: 2px 8px;" onclick="copyToClipboard('${fullUrl}')">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                        `;
+                    }
+                    html += `</div>`;
+                });
+                html += `</div>`;
+            }
+            
+            linksList.innerHTML = html;
+            linksContainer.classList.add('show');
+            
+            // Rolar para ver os links
+            linksContainer.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text)
+                .then(() => showToast('✅ Link copiado para a área de transferência!', 'success'))
+                .catch(() => {
+                    // Fallback
+                    const textArea = document.createElement('textarea');
+                    textArea.value = text;
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textArea);
+                    showToast('✅ Link copiado!', 'success');
+                });
+        }
+        
+        // =============== SISTEMA ===============
+        function loadSystemStats() {
+            fetch('/api/system')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('cpu').textContent = data.cpu || '--%';
+                    document.getElementById('memory').textContent = data.memory || '--%';
+                    document.getElementById('conversionsTotal').textContent = data.total_conversions || '0';
+                    document.getElementById('conversionsSuccess').textContent = data.success_conversions || '0';
+                    
+                    // Status do FFmpeg
+                    const ffmpegStatus = document.getElementById('ffmpegStatus');
+                    if (data.ffmpeg_status === 'ok') {
+                        ffmpegStatus.textContent = '✅ FFmpeg Disponível';
+                        ffmpegStatus.className = 'ffmpeg-status ffmpeg-ok';
+                        if (data.ffmpeg_path) {
+                            document.getElementById('ffmpegPath').textContent = `Local: ${data.ffmpeg_path}`;
+                        }
+                    } else {
+                        ffmpegStatus.textContent = '❌ FFmpeg Não Encontrado';
+                        ffmpegStatus.className = 'ffmpeg-status ffmpeg-error';
+                        document.getElementById('ffmpegPath').textContent = 'Execute: sudo apt-get install ffmpeg';
+                    }
+                })
+                .catch(error => {
+                    console.error('Erro ao carregar stats:', error);
+                });
+        }
+        
+        function refreshStats() {
+            loadSystemStats();
+            showToast('Status atualizado com sucesso', 'success');
+        }
+        
+        function testFFmpeg() {
+            fetch('/api/ffmpeg-test')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showToast(`✅ FFmpeg funcionando! Versão: ${data.version}`, 'success');
+                    } else {
+                        showToast(`❌ FFmpeg não está funcionando: ${data.error}`, 'error');
+                    }
+                })
+                .catch(error => {
+                    showToast(`❌ Erro ao testar FFmpeg: ${error.message}`, 'error');
+                });
+        }
+        
+        // =============== HISTÓRICO DE CONVERSÕES ===============
+        function loadConversions() {
+            fetch('/api/conversions')
+                .then(response => response.json())
+                .then(data => {
+                    const container = document.getElementById('conversionsList');
+                    const statsContainer = document.getElementById('conversionStats');
+                    
+                    // Atualizar estatísticas
+                    if (data.stats) {
+                        statsContainer.innerHTML = `
+                            Total: ${data.stats.total || 0} | 
+                            Sucesso: ${data.stats.success || 0} | 
+                            Falhas: ${data.stats.failed || 0}
+                        `;
+                    }
+                    
+                    if (!data.conversions || data.conversions.length === 0) {
+                        container.innerHTML = `
+                            <div class="empty-state">
+                                <i class="fas fa-history"></i>
+                                <h3>Nenhuma conversão realizada ainda</h3>
+                                <p>Converta seu primeiro vídeo para ver o histórico aqui</p>
+                            </div>
+                        `;
+                        return;
+                    }
+                    
+                    let html = '<div class="conversions-list">';
+                    
+                    const conversions = Array.isArray(data.conversions) ? data.conversions : [];
+                    
+                    conversions.forEach(conv => {
+                        const videoId = conv.video_id || conv.id || 'N/A';
+                        const filename = conv.filename || 'Arquivo desconhecido';
+                        const timestamp = conv.timestamp || new Date().toISOString();
+                        const qualities = Array.isArray(conv.qualities) ? conv.qualities : [];
+                        const status = conv.status || 'unknown';
+                        const conversionName = conv.conversion_name || conv.filename;
+                        
+                        html += `
+                            <div class="conversion-card">
+                                <div class="conversion-header">
+                                    <span class="conversion-id">${conversionName.substring(0, 20)}${conversionName.length > 20 ? '...' : ''}</span>
+                                    <span class="conversion-status status-${status}">
+                                        ${status === 'success' ? '✅ Sucesso' : '❌ Falha'}
+                                    </span>
+                                </div>
+                                <div class="conversion-info">
+                                    <p><strong>Nome:</strong> ${conversionName}</p>
+                                    <p><strong>Data:</strong> ${formatDate(timestamp)}</p>
+                                    <p><strong>Qualidades:</strong> ${qualities.join(', ') || 'N/A'}</p>
+                                    <p><strong>Arquivos:</strong> ${conv.videos_count || 1}</p>
+                                </div>
+                                <div class="conversion-actions">
+                                    <button class="btn btn-primary" onclick="copyLink('${videoId}')">
+                                        <i class="fas fa-link"></i> Link
+                                    </button>
+                                    <button class="btn btn-success" onclick="playVideo('${videoId}')">
+                                        <i class="fas fa-play"></i> Play
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    html += '</div>';
+                    container.innerHTML = html;
+                })
+                .catch(error => {
+                    console.error('Erro ao carregar conversões:', error);
+                });
+        }
+        
+        function clearHistory() {
+            if (confirm('Tem certeza que deseja limpar todo o histórico de conversões?')) {
+                fetch('/api/clear-history', { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            showToast('✅ Histórico limpo com sucesso!', 'success');
+                            loadConversions();
+                            loadSystemStats();
+                        } else {
+                            showToast(`❌ Erro: ${data.error}`, 'error');
+                        }
+                    })
+                    .catch(error => {
+                        showToast('❌ Erro ao limpar histórico', 'error');
+                    });
+            }
+        }
+        
+        function copyLink(videoId) {
+            const link = window.location.origin + '/hls/' + videoId + '/master.m3u8';
+            copyToClipboard(link);
+        }
+        
+        function playVideo(videoId) {
+            window.open('/player/' + videoId, '_blank');
+        }
+        
+        // =============== CONFIGURAÇÕES ===============
+        function changePassword() {
+            window.location.href = '/change-password';
+        }
+        
+        function cleanupFiles() {
+            if (confirm('Limpar todos os arquivos temporários e convertidos?')) {
+                fetch('/api/cleanup', { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            showToast(`✅ ${data.message}`, 'success');
+                        } else {
+                            showToast(`❌ Erro: ${data.error}`, 'error');
+                        }
+                    })
+                    .catch(() => {
+                        showToast('❌ Erro ao limpar arquivos', 'error');
+                    });
+            }
+        }
+        
+        function cleanupOldFiles() {
+            if (confirm('Limpar arquivos antigos (mais de 7 dias)?')) {
+                fetch('/api/cleanup-old', { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        showToast(data.message || '✅ Arquivos antigos removidos', 'success');
+                    })
+                    .catch(() => {
+                        showToast('❌ Erro ao limpar arquivos antigos', 'error');
+                    });
+            }
+        }
+        
+        function loadSystemInfo() {
+            fetch('/api/system-info')
+                .then(response => response.json())
+                .then(data => {
+                    const container = document.getElementById('systemInfo');
+                    container.innerHTML = `
+                        <p><strong>Versão:</strong> ${data.version || 'N/A'}</p>
+                        <p><strong>Diretório:</strong> ${data.base_dir || 'N/A'}</p>
+                        <p><strong>Usuários:</strong> ${data.users_count || 0}</p>
+                        <p><strong>Serviço:</strong> ${data.service_status || 'N/A'}</p>
+                        <p><strong>Uptime:</strong> ${data.uptime || 'N/A'}</p>
+                        <p><strong>Backup:</strong> ${data.backup_enabled ? 'Habilitado' : 'Desabilitado'}</p>
+                    `;
+                })
+                .catch(error => {
+                    document.getElementById('systemInfo').innerHTML = 'Erro ao carregar informações';
+                });
+        }
+        
+        // =============== BACKUP ===============
+        function createBackup() {
+            const backupName = document.getElementById('backupName').value.trim();
+            const nameParam = backupName ? `?name=${encodeURIComponent(backupName)}` : '';
+            
+            showToast('Criando backup...', 'info');
+            
+            fetch(`/api/backup/create${nameParam}`, { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showToast(`✅ Backup criado: ${data.backup_name} (${formatBytes(data.size)})`, 'success');
+                        document.getElementById('backupName').value = '';
+                        loadBackups();
+                    } else {
+                        showToast(`❌ Erro: ${data.error}`, 'error');
+                    }
+                })
+                .catch(error => {
+                    showToast(`❌ Erro de conexão: ${error.message}`, 'error');
+                });
+        }
+        
+        function loadBackups() {
+            fetch('/api/backup/list')
+                .then(response => response.json())
+                .then(data => {
+                    const container = document.getElementById('backupsList');
+                    
+                    if (!data.backups || data.backups.length === 0) {
+                        container.innerHTML = `
+                            <div class="empty-state">
+                                <i class="fas fa-database"></i>
+                                <p>Nenhum backup encontrado</p>
+                        </div>
+                        `;
+                        return;
+                    }
+                    
+                    let html = '';
+                    data.backups.forEach(backup => {
+                        html += `
+                            <div class="backup-item">
+                                <div>
+                                    <strong>${backup.name}</strong><br>
+                                    <small style="color: #666;">
+                                        ${formatDate(backup.modified)} • ${formatBytes(backup.size)}
+                                    </small>
+                                </div>
+                                <div class="backup-actions">
+                                    <button class="btn btn-restore btn-sm" onclick="downloadBackup('${backup.name}')">
+                                        <i class="fas fa-download"></i>
+                                    </button>
+                                    <button class="btn btn-backup btn-sm" onclick="restoreSpecificBackup('${backup.name}')">
+                                        <i class="fas fa-upload"></i>
+                                    </button>
+                                    <button class="btn btn-danger btn-sm" onclick="deleteBackup('${backup.name}')">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    container.innerHTML = html;
+                })
+                .catch(error => {
+                    showToast('Erro ao carregar backups', 'error');
+                });
+        }
+        
+        function downloadBackup(backupName) {
+            window.open(`/api/backup/download/${backupName}`, '_blank');
+        }
+        
+        function restoreSpecificBackup(backupName) {
+            if (confirm(`Restaurar backup "${backupName}"? O sistema será reiniciado.`)) {
+                fetch(`/api/backup/restore/${backupName}`, { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            showToast('✅ Backup restaurado! Reiniciando...', 'success');
+                            setTimeout(() => {
+                                window.location.reload();
+                            }, 2000);
+                        } else {
+                            showToast(`❌ Erro: ${data.error}`, 'error');
+                        }
+                    })
+                    .catch(error => {
+                        showToast('Erro ao restaurar backup', 'error');
+                    });
+            }
+        }
+        
+        function deleteBackup(backupName) {
+            if (confirm(`Excluir backup "${backupName}" permanentemente?`)) {
+                fetch(`/api/backup/delete/${backupName}`, { method: 'DELETE' })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            showToast('✅ Backup excluído', 'success');
+                            loadBackups();
+                        } else {
+                            showToast(`❌ Erro: ${data.error}`, 'error');
+                        }
+                    })
+                    .catch(error => {
+                        showToast('Erro ao excluir backup', 'error');
+                    });
+            }
+        }
+        
+        function deleteAllBackups() {
+            if (confirm('Excluir TODOS os backups permanentemente?')) {
+                fetch('/api/backup/delete-all', { method: 'DELETE' })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            showToast(`✅ ${data.deleted} backups excluídos`, 'success');
+                            loadBackups();
+                        } else {
+                            showToast(`❌ Erro: ${data.error}`, 'error');
+                        }
+                    })
+                    .catch(error => {
+                        showToast('Erro ao excluir backups', 'error');
+                    });
+            }
+        }
+        
+        function handleRestoreFile() {
+            const fileInput = document.getElementById('restoreFile');
+            if (fileInput.files.length > 0) {
+                const file = fileInput.files[0];
+                if (!file.name.endsWith('.tar.gz') && !file.name.endsWith('.tgz')) {
+                    showToast('Por favor, selecione um arquivo .tar.gz', 'error');
+                    fileInput.value = '';
+                    return;
+                }
+                
+                restoreFileData = file;
+                document.getElementById('backupFileName').textContent = file.name;
+                document.getElementById('selectedBackupFile').style.display = 'block';
+            }
+        }
+        
+        function removeRestoreFile() {
+            document.getElementById('restoreFile').value = '';
+            document.getElementById('selectedBackupFile').style.display = 'none';
+            restoreFileData = null;
+        }
+        
+        function restoreBackup() {
+            if (!restoreFileData) {
+                showToast('Por favor, selecione um arquivo de backup', 'warning');
+                return;
+            }
+            
+            if (!confirm('ATENÇÃO: Restaurar backup substituirá todas as configurações atuais. Continuar?')) {
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('backup', restoreFileData);
+            
+            const restoreBtn = document.getElementById('restoreBtn');
+            const originalBtnText = restoreBtn.innerHTML;
+            restoreBtn.disabled = true;
+            restoreBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Restaurando...';
+            
+            fetch('/api/backup/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showToast('✅ Backup restaurado! Reiniciando sistema...', 'success');
+                    setTimeout(() => {
+                        window.location.href = '/login';
+                    }, 3000);
+                } else {
+                    showToast(`❌ Erro: ${data.error}`, 'error');
+                    restoreBtn.disabled = false;
+                    restoreBtn.innerHTML = originalBtnText;
+                }
+            })
+            .catch(error => {
+                showToast(`❌ Erro: ${error.message}`, 'error');
+                restoreBtn.disabled = false;
+                restoreBtn.innerHTML = originalBtnText;
+            });
+        }
+        
+        // =============== UTILITÁRIOS ===============
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+        
+        function formatDate(timestamp) {
+            try {
+                const date = new Date(timestamp);
+                return date.toLocaleString('pt-BR');
+            } catch {
+                return 'Data inválida';
+            }
+        }
+        
+        function showToast(message, type = 'info') {
+            // Remover toasts anteriores
+            document.querySelectorAll('.toast').forEach(toast => toast.remove());
+            
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `
+                <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i>
+                <span>${message}</span>
+            `;
+            
+            document.body.appendChild(toast);
+            
+            // Remover após 5 segundos
+            setTimeout(() => {
+                toast.remove();
+            }, 5000);
+        }
+        
+        // =============== INICIALIZAÇÃO ===============
+        document.addEventListener('DOMContentLoaded', function() {
+            loadSystemStats();
+            
+            // Atualizar stats a cada 30 segundos
+            setInterval(loadSystemStats, 30000);
+            
+            // Configurar drag and drop para upload externo
+            const uploadArea = document.querySelector('#externalUpload .upload-area');
+            
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.style.backgroundColor = 'rgba(67, 97, 238, 0.1)';
+            });
+            
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.style.backgroundColor = '';
+            });
+            
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.style.backgroundColor = '';
+                
+                if (e.dataTransfer.files.length > 0) {
+                    Array.from(e.dataTransfer.files).forEach(file => {
+                        if (!selectedFiles.some(f => f.name === file.name && f.size === file.size)) {
+                            selectedFiles.push(file);
+                        }
+                    });
+                    
+                    updateExternalFileList();
+                    
+                    const selectedFilesDiv = document.getElementById('selectedFiles');
+                    selectedFilesDiv.style.display = 'block';
+                }
+            });
+            
+            // Configurar drag and drop para backup
+            const backupUploadArea = document.querySelector('#backup .upload-area');
+            if (backupUploadArea) {
+                backupUploadArea.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    backupUploadArea.style.backgroundColor = 'rgba(67, 97, 238, 0.1)';
+                });
+                
+                backupUploadArea.addEventListener('dragleave', () => {
+                    backupUploadArea.style.backgroundColor = '';
+                });
+                
+                backupUploadArea.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    backupUploadArea.style.backgroundColor = '';
+                    
+                    if (e.dataTransfer.files.length > 0) {
+                        const file = e.dataTransfer.files[0];
+                        if (file.name.endsWith('.tar.gz') || file.name.endsWith('.tgz')) {
+                            restoreFileData = file;
+                            document.getElementById('backupFileName').textContent = file.name;
+                            document.getElementById('selectedBackupFile').style.display = 'block';
+                        } else {
+                            showToast('Por favor, solte apenas arquivos .tar.gz', 'error');
+                        }
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>
+'''
 
 # =============== ROTAS PRINCIPAIS ===============
 
@@ -1160,10 +3351,7 @@ def index():
     if password_change_required(session['user_id']):
         return redirect(url_for('change_password'))
     
-    # Carregar o dashboard HTML completo do primeiro código
-    # Aqui vou usar um HTML simplificado por questão de espaço
-    # Na versão real, use o HTML completo do primeiro código
-    return render_template_string(DASHBOARD_HTML)  # DASHBOARD_HTML contém o código completo
+    return render_template_string(DASHBOARD_HTML)
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -2120,7 +4308,7 @@ def health():
 # =============== INICIALIZAÇÃO ===============
 if __name__ == '__main__':
     print("=" * 70)
-    print("🚀 HLS Converter ULTIMATE - Versão 2.4.0 COMPLETA")
+    print("🚀 HLS Converter ULTIMATE - Versão 2.4.0")
     print("=" * 70)
     print(f"📂 Diretório base: {BASE_DIR}")
     print(f"📁 Mídia interna: {INTERNAL_MEDIA_DIR}")
@@ -2202,8 +4390,8 @@ cat > /opt/hls-converter/db/conversions.json << 'EOF'
 }
 EOF
 
-# 11. CRIAR SCRIPT DE GERENCIAMENTO MELHORADO
-echo "📝 Criando script de gerenciamento melhorado..."
+# 11. CRIAR SCRIPT DE GERENCIAMENTO VERSÃO 2.4.0
+echo "📝 Criando script de gerenciamento v2.4.0..."
 
 cat > /usr/local/bin/hlsctl << 'EOF'
 #!/bin/bash
@@ -2248,13 +4436,12 @@ case "$1" in
             echo "🌐 Testando health check..."
             if curl -s http://localhost:8080/health | grep -q "healthy"; then
                 echo "✅ Health check OK"
-                curl -s http://localhost:8080/health | jq -r '.version + " - " + .features.internal_media'
             else
                 echo "⚠️  Health check falhou"
                 curl -s http://localhost:8080/health || true
             fi
             
-            echo "📂 Testando listagem de mídia interna..."
+            echo "📂 Testando mídia interna..."
             if curl -s http://localhost:8080/api/internal-media | grep -q '"success":true'; then
                 echo "✅ API de mídia interna OK"
             else
@@ -2286,8 +4473,7 @@ case "$1" in
         echo "📁 Verificando diretórios..."
         for dir in "$HLS_HOME" "$HLS_HOME/uploads" "$HLS_HOME/hls" "$HLS_HOME/backups" "$HLS_HOME/db" "$HLS_HOME/internal_media"; do
             if [ -d "$dir" ]; then
-                COUNT=$(find "$dir" -type f 2>/dev/null | wc -l)
-                echo "✅ $dir ($COUNT arquivos)"
+                echo "✅ $dir"
             else
                 echo "❌ $dir (não existe)"
             fi
@@ -2304,10 +4490,10 @@ case "$1" in
             echo "❌ Falha ao instalar FFmpeg"
         fi
         ;;
-    add-video)
+    add-media)
         if [ -z "$2" ]; then
             echo "❌ Por favor, forneça o caminho do vídeo"
-            echo "   Exemplo: hlsctl add-video /caminho/para/video.mp4"
+            echo "   Exemplo: hlsctl add-media /caminho/para/video.mp4"
             exit 1
         fi
         
@@ -2316,24 +4502,18 @@ case "$1" in
             exit 1
         fi
         
-        echo "📥 Copiando vídeo para diretório interno..."
+        echo "📥 Copiando mídia para diretório interno..."
         cp "$2" /opt/hls-converter/internal_media/
-        echo "✅ Vídeo copiado: $(basename "$2")"
+        echo "✅ Mídia copiada: $(basename "$2")"
         echo "📁 Diretório: /opt/hls-converter/internal_media/"
         ls -la /opt/hls-converter/internal_media/
         ;;
-    list-videos)
-        echo "📁 Vídeos disponíveis no diretório interno:"
+    list-media)
+        echo "📁 Mídia disponível no diretório interno:"
         echo ""
         ls -la /opt/hls-converter/internal_media/
         echo ""
-        echo "🎬 Total de vídeos: $(ls -1 /opt/hls-converter/internal_media/ 2>/dev/null | wc -l || echo 0)"
-        echo ""
-        echo "💡 Para ver na interface web:"
-        echo "   1. Acesse http://localhost:8080/"
-        echo "   2. Vá para a aba 'Upload'"
-        echo "   3. Clique em 'Arquivos Internos'"
-        echo "   4. Clique em 'Atualizar Lista'"
+        echo "🎬 Total de arquivos: $(ls -1 /opt/hls-converter/internal_media/ | wc -l)"
         ;;
     cleanup)
         echo "🧹 Limpando arquivos antigos..."
@@ -2423,7 +4603,7 @@ else:
         ls -la /opt/hls-converter/internal_media/ 2>/dev/null || echo "Diretório internal_media/ não existe"
         
         echo ""
-        echo "🧪 Teste de API completa:"
+        echo "🧪 Teste de API:"
         echo "Health check:"
         curl -s http://localhost:8080/health | jq . 2>/dev/null || curl -s http://localhost:8080/health
         
@@ -2432,15 +4612,9 @@ else:
         curl -s http://localhost:8080/api/internal-media | jq . 2>/dev/null || curl -s http://localhost:8080/api/internal-media
         
         echo ""
-        echo "📊 Sistema via API:"
-        curl -s http://localhost:8080/api/system | jq . 2>/dev/null || curl -s http://localhost:8080/api/system
-        
-        echo ""
         echo "🔧 FFmpeg:"
         if command -v ffmpeg &> /dev/null; then
             ffmpeg -version | head -1
-            echo "Codecs disponíveis:"
-            ffmpeg -codecs 2>/dev/null | grep -E "(h264|aac|hls)" | head -5 || true
         else
             echo "FFmpeg não encontrado"
         fi
@@ -2456,42 +4630,28 @@ else:
         echo ""
         echo "🔑 Banco de dados:"
         ls -la /opt/hls-converter/db/
-        
-        echo ""
-        echo "💾 Espaço em disco:"
-        df -h /opt/hls-converter
-        
-        echo ""
-        echo "🧠 Memória:"
-        free -h
-        
-        echo ""
-        echo "🔥 Processos FFmpeg:"
-        pgrep -a ffmpeg || echo "Nenhum processo FFmpeg em execução"
         ;;
     info)
         IP=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "localhost")
         echo "=" * 70
-        echo "🎬 HLS Converter ULTIMATE v2.4.0 COMPLETA - Informações do Sistema"
+        echo "🎬 HLS Converter ULTIMATE v2.4.0 - Informações do Sistema"
         echo "=" * 70
         echo "Status: $(systemctl is-active hls-converter 2>/dev/null || echo 'inactive')"
-        echo "Versão: 2.4.0 (Todas melhorias incluídas)"
+        echo "Versão: 2.4.0 (Completo com todos os recursos)"
         echo "Porta: 8080"
         echo "Login: http://$IP:8080/login"
         echo "Usuário: admin"
         echo "Senha: admin (altere no primeiro acesso)"
         echo ""
-        echo "✨ TODAS MELHORIAS IMPLEMENTADAS:"
-        echo "  ✅ Sistema de arquivos internos (/opt/hls-converter/internal_media/)"
-        echo "  ✅ Duas formas de importação: Upload vs Arquivos Internos"
-        echo "  ✅ Conversão de múltiplos vídeos em sequência"
-        echo "  ✅ Timeout INFINITO para conversões longas"
-        echo "  ✅ Continuidade de segmentos entre múltiplos vídeos"
-        echo "  ✅ Interface web moderna com seleção de origem"
-        echo "  ✅ Nome personalizado para cada conversão"
+        echo "✨ NOVAS FUNCIONALIDADES v2.4.0:"
+        echo "  ✅ Timeout infinito para conversões longas"
+        echo "  ✅ Continuar sequência de segmentos para múltiplos vídeos"
+        echo "  ✅ Seleção de arquivos internos do servidor"
+        echo "  ✅ Interface com duas formas de importação"
+        echo "  ✅ Progresso em tempo real por arquivo"
+        echo "  ✅ Nome personalizado para conversões"
         echo "  ✅ Sistema de backup completo"
-        echo "  ✅ Histórico de conversões detalhado"
-        echo "  ✅ Links corrigidos para todas as qualidades"
+        echo "  ✅ Links corrigidos para cada qualidade"
         echo ""
         echo "📂 DIRETÓRIOS:"
         echo "  📁 Principal: /opt/hls-converter"
@@ -2509,8 +4669,8 @@ else:
         echo "  hlsctl test         - Testar sistema completo"
         echo "  hlsctl debug        - Modo debug detalhado"
         echo "  hlsctl fix-ffmpeg   - Instalar/reparar FFmpeg"
-        echo "  hlsctl add-video FILE - Adicionar vídeo ao diretório interno"
-        echo "  hlsctl list-videos  - Listar vídeos disponíveis"
+        echo "  hlsctl add-media FILE - Adicionar mídia ao diretório interno"
+        echo "  hlsctl list-media   - Listar mídia disponível"
         echo "  hlsctl cleanup      - Limpar arquivos antigos"
         echo "  hlsctl backup       - Criar backup manual"
         echo "  hlsctl restore FILE - Restaurar backup"
@@ -2519,7 +4679,7 @@ else:
         echo "=" * 70
         ;;
     *)
-        echo "🎬 HLS Converter ULTIMATE v2.4.0 COMPLETA - Gerenciador"
+        echo "🎬 HLS Converter ULTIMATE v2.4.0 - Gerenciador"
         echo "==================================================="
         echo ""
         echo "Uso: hlsctl [comando]"
@@ -2533,8 +4693,8 @@ else:
         echo "  test                - Testar sistema completo"
         echo "  debug               - Modo debug detalhado"
         echo "  fix-ffmpeg          - Instalar/reparar FFmpeg"
-        echo "  add-video FILE      - Adicionar vídeo ao diretório interno"
-        echo "  list-videos         - Listar vídeos disponíveis"
+        echo "  add-media FILE      - Adicionar mídia ao diretório interno"
+        echo "  list-media          - Listar mídia disponível"
         echo "  cleanup             - Limpar arquivos antigos"
         echo "  backup              - Criar backup manual"
         echo "  restore FILE        - Restaurar backup"
@@ -2543,19 +4703,13 @@ else:
         echo ""
         echo "Exemplos:"
         echo "  hlsctl start"
-        echo "  hlsctl add-video /home/usuario/video.mp4"
-        echo "  hlsctl list-videos"
+        echo "  hlsctl add-media /home/usuario/video.mp4"
+        echo "  hlsctl list-media"
         echo "  hlsctl test"
         echo "  hlsctl debug"
         echo ""
         echo "💡 Dica: Adicione vídeos ao diretório interno:"
         echo "  sudo cp video.mp4 /opt/hls-converter/internal_media/"
-        echo ""
-        echo "✨ Funcionalidades da versão 2.4.0:"
-        echo "  • Importação de arquivos internos"
-        echo "  • Timeout infinito para conversões"
-        echo "  • Continuidade de segmentos"
-        echo "  • Interface com duas origens"
         ;;
 esac
 EOF
@@ -2634,48 +4788,7 @@ else
     journalctl -u hls-converter -n 20 --no-pager
 fi
 
-# 15. CRIAR EXEMPLO DE VÍDEO PARA TESTE
-echo ""
-echo "📝 Criando exemplo para teste..."
-
-cat > /opt/hls-converter/internal_media/README.txt << 'EOF'
-🎬 Diretório de Mídia Interna - HLS Converter ULTIMATE v2.4.0
-
-Adicione aqui seus vídeos para conversão em HLS diretamente do servidor.
-
-Formatos suportados:
-- MP4, AVI, MOV, MKV, WEBM, FLV, WMV, M4V, MPG, MPEG
-
-Como usar:
-1. Adicione vídeos a este diretório:
-   sudo cp /caminho/do/video.mp4 /opt/hls-converter/internal_media/
-
-2. Acesse a interface web:
-   http://localhost:8080/
-
-3. Vá para a aba "Upload"
-4. Selecione "Arquivos Internos"
-5. Clique em "Atualizar Lista"
-6. Selecione os vídeos desejados
-7. Digite um nome para a conversão
-8. Selecione as qualidades desejadas
-9. Clique em "Iniciar Conversão"
-
-Vantagens dos arquivos internos:
-- Não precisa fazer upload (mais rápido)
-- Ideal para vídeos grandes
-- Pode converter múltiplos vídeos em sequência
-- Mantém segmentos contínuos entre vídeos
-
-Comandos úteis via terminal:
-- hlsctl add-video /caminho/video.mp4
-- hlsctl list-videos
-- hlsctl test
-
-Nota: Os vídeos não são movidos, apenas processados a partir deste diretório.
-EOF
-
-# 16. VERIFICAÇÃO FINAL
+# 15. VERIFICAÇÃO FINAL
 echo "🔍 Realizando verificação final..."
 
 IP=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "localhost")
@@ -2688,8 +4801,7 @@ if systemctl is-active --quiet hls-converter.service; then
     
     echo "🌐 Testando health check..."
     if timeout 5 curl -s http://localhost:8080/health | grep -q "healthy"; then
-        VERSION=$(timeout 5 curl -s http://localhost:8080/health | jq -r '.version' 2>/dev/null || echo "2.4.0")
-        echo "✅ Health check: OK (Versão: $VERSION)"
+        echo "✅ Health check: OK"
     else
         echo "⚠️  Health check: Pode ter problemas"
         timeout 3 curl -s http://localhost:8080/health || echo "Timeout ou erro"
@@ -2712,7 +4824,7 @@ if systemctl is-active --quiet hls-converter.service; then
     
     echo "🎬 Testando FFmpeg..."
     if command -v ffmpeg &> /dev/null; then
-        echo "✅ FFmpeg encontrado: $(which ffmpeg)"
+        echo "✅ FFmpeg encontrado"
     else
         echo "❌ FFmpeg não encontrado"
     fi
@@ -2724,36 +4836,61 @@ else
     journalctl -u hls-converter -n 30 --no-pager
 fi
 
+# 16. CRIAR EXEMPLO DE MÍDIA PARA TESTE
+echo ""
+echo "📝 Criando exemplo de mídia para teste..."
+
+cat > /opt/hls-converter/internal_media/README.txt << 'EOF'
+🎬 Diretório de Mídia Interna
+
+Adicione aqui seus vídeos para conversão em HLS.
+
+Formatos suportados:
+- MP4, AVI, MOV, MKV, WEBM, FLV, WMV, M4V, MPG, MPEG
+
+Como adicionar vídeos:
+1. Copie o vídeo para este diretório:
+   sudo cp /caminho/do/video.mp4 /opt/hls-converter/internal_media/
+
+2. Atualize a lista na interface web clicando em "Atualizar Lista"
+
+3. Selecione os vídeos desejados e inicie a conversão
+
+Nota: Os vídeos não são movidos, apenas copiados para processamento.
+
+Para listar mídia disponível via terminal:
+  hlsctl list-media
+
+Para adicionar mídia via terminal:
+  hlsctl add-media /caminho/para/video.mp4
+EOF
+
 # 17. INFORMAÇÕES FINAIS
 echo ""
 echo "=" * 70
-echo "🎉🎉🎉 INSTALAÇÃO COMPLETA v2.4.0 FINALIZADA! 🎉🎉🎉"
+echo "🎉🎉🎉 INSTALAÇÃO v2.4.0 COMPLETA! 🎉🎉🎉"
 echo "=" * 70
 echo ""
-echo "✅ TODAS MELHORIAS INTEGRADAS:"
-echo "   ✅ Sistema de arquivos internos"
-echo "   ✅ Duas formas de importação (Upload vs Interno)"
+echo "✅ TODAS AS MELHORIAS APLICADAS:"
 echo "   ✅ Timeout infinito para conversões longas"
-echo "   ✅ Continuidade de segmentos entre vídeos"
-echo "   ✅ Interface web moderna com seleção de origem"
+echo "   ✅ Continuar sequência de segmentos para múltiplos vídeos"
+echo "   ✅ Seleção de arquivos internos do servidor"
+echo "   ✅ Interface com duas formas de importação"
+echo "   ✅ Progresso em tempo real por arquivo"
+echo "   ✅ Nome personalizado para conversões"
 echo "   ✅ Sistema de backup completo"
+echo "   ✅ Links corrigidos para cada qualidade"
 echo ""
-echo "✨ FUNCIONALIDADES PRINCIPAIS:"
-echo "   1. DUAS FORMAS DE IMPORTAR VÍDEOS:"
-echo "      📤 Upload de arquivos externos (até 50GB)"
-echo "      📁 Seleção de arquivos internos do servidor"
-echo "   2. CONVERSÃO DE MÚLTIPLOS VÍDEOS:"
-echo "      🎬 Processamento em sequência"
-echo "      🔄 Continuidade de segmentos"
-echo "      ⏱️  Timeout infinito"
-echo "   3. INTERFACE WEB MODERNA:"
-echo "      🎨 Design responsivo"
-echo "      📊 Progresso em tempo real"
-echo "      🏷️  Nome personalizado para conversões"
-echo "   4. SISTEMA COMPLETO:"
-echo "      💾 Backup e restauração"
-echo "      📋 Histórico detalhado"
-echo "      🔐 Autenticação segura"
+echo "✨ NOVAS FUNCIONALIDADES:"
+echo "   1. Duas formas de seleção de vídeos:"
+echo "      📤 Upload de arquivos externos"
+echo "      📁 Seleção de arquivos internos"
+echo "   2. Conversão de múltiplos vídeos em sequência"
+echo "   3. Continuar numeração de segmentos"
+echo "   4. Timeout infinito para conversões longas"
+echo "   5. Progresso individual por vídeo"
+echo "   6. Interface com tabs para escolha"
+echo "   7. Nome personalizado para conversões"
 echo ""
 echo "🔗 URLS DO SISTEMA:"
 echo "   🔐 Login:        http://$IP:8080/login"
@@ -2761,20 +4898,19 @@ echo "   🎮 Dashboard:    http://$IP:8080/"
 echo "   🎬 Upload:       http://$IP:8080/#upload"
 echo "   🩺 Health:       http://$IP:8080/health"
 echo ""
-echo "📂 ADICIONAR VÍDEOS INTERNOS:"
+echo "📂 ADICIONAR MÍDIA INTERNA:"
 echo "   Via terminal:"
 echo "     sudo cp video.mp4 /opt/hls-converter/internal_media/"
-echo "     hlsctl add-video /caminho/para/video.mp4"
+echo "     hlsctl add-media /caminho/para/video.mp4"
 echo ""
 echo "   Via interface web:"
-echo "     1. Acesse http://$IP:8080/"
-echo "     2. Vá para a aba 'Upload'"
-echo "     3. Clique em 'Arquivos Internos'"
-echo "     4. Clique em 'Atualizar Lista'"
-echo "     5. Selecione os vídeos desejados"
-echo "     6. Digite um nome para a conversão"
-echo "     7. Selecione as qualidades"
-echo "     8. Clique em 'Iniciar Conversão'"
+echo "     1. Acesse a aba 'Upload'"
+echo "     2. Clique em 'Arquivos Internos'"
+echo "     3. Clique em 'Atualizar Lista'"
+echo "     4. Selecione os vídeos desejados"
+echo "     5. Digite um nome para a conversão"
+echo "     6. Selecione as qualidades"
+echo "     7. Clique em 'Iniciar Conversão'"
 echo ""
 echo "⚙️  COMANDOS DE GERENCIAMENTO:"
 echo "   • hlsctl start        - Iniciar serviço"
@@ -2785,27 +4921,26 @@ echo "   • hlsctl logs [-f]    - Ver logs (-f para seguir)"
 echo "   • hlsctl test         - Testar sistema completo"
 echo "   • hlsctl debug        - Modo debug detalhado"
 echo "   • hlsctl fix-ffmpeg   - Instalar/reparar FFmpeg"
-echo "   • hlsctl add-video FILE - Adicionar vídeo interno"
-echo "   • hlsctl list-videos  - Listar vídeos disponíveis"
+echo "   • hlsctl add-media FILE - Adicionar mídia interna"
+echo "   • hlsctl list-media   - Listar mídia disponível"
 echo "   • hlsctl cleanup      - Limpar arquivos antigos"
 echo "   • hlsctl backup       - Criar backup"
 echo "   • hlsctl restore FILE - Restaurar backup"
 echo "   • hlsctl info         - Informações do sistema"
 echo ""
 echo "💡 DICAS DE USO:"
-echo "   1. Use arquivos internos para vídeos grandes (>1GB)"
-echo "   2. Teste com 2-3 vídeos pequenos primeiro"
+echo "   1. Teste com 2-3 vídeos pequenos primeiro"
+echo "   2. Use a opção 'Continuar sequência de segmentos' para playlists"
 echo "   3. Verifique espaço em disco antes de converter"
 echo "   4. Monitore o progresso em tempo real"
-echo "   5. Use 'hlsctl debug' para solucionar problemas"
+echo "   5. Use arquivos internos para vídeos grandes"
 echo ""
-echo "🆘 SUPORTE E SOLUÇÃO DE PROBLEMAS:"
+echo "🆘 SUPORTE:"
 echo "   Se tiver problemas:"
 echo "   1. Execute: hlsctl debug"
 echo "   2. Verifique logs: hlsctl logs -f"
 echo "   3. Teste FFmpeg: hlsctl fix-ffmpeg"
-echo "   4. Verifique permissões: chown -R hlsuser:hlsuser /opt/hls-converter"
 echo ""
 echo "=" * 70
-echo "🚀 Sistema 100% funcional com todas melhorias da versão 2.4.0!"
+echo "🚀 Sistema 100% funcional com todas as melhorias do código 1!"
 echo "=" * 70
