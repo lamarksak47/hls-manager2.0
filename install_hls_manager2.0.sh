@@ -1,9 +1,9 @@
 #!/bin/bash
-# install_hls_converter_final_corrigido.sh - VERSÃO 2.4.0 COMPLETA COM MELHORIAS
+# install_hls_converter_final_corrigido.sh - VERSÃO 2.4.1 COMPLETA COM DIRETÓRIO ÚNICO
 
 set -e
 
-echo "🚀 INSTALANDO HLS CONVERTER ULTIMATE - VERSÃO 2.4.0"
+echo "🚀 INSTALANDO HLS CONVERTER ULTIMATE - VERSÃO 2.4.1"
 echo "=================================================================="
 
 # 1. Verificar privilégios
@@ -146,14 +146,14 @@ ln -sf /etc/nginx/sites-available/hls-converter /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default
 systemctl restart nginx
 
-# 9. CRIAR APLICAÇÃO FLASK COMPLETA - VERSÃO 2.4.0
-echo "💻 Criando aplicação Flask versão 2.4.0..."
+# 9. CRIAR APLICAÇÃO FLASK COMPLETA - VERSÃO 2.4.1
+echo "💻 Criando aplicação Flask versão 2.4.1..."
 
 cat > /opt/hls-converter/app.py << 'EOF'
 #!/usr/bin/env python3
 """
-HLS Converter ULTIMATE - Versão Corrigida 2.4.0
-Sistema completo com importação interna/externa, múltiplos arquivos e timeout infinito
+HLS Converter ULTIMATE - Versão 2.4.1
+Sistema completo com DIRETÓRIO ÚNICO para segmentos
 """
 
 import os
@@ -370,7 +370,7 @@ def create_backup(backup_name=None):
         metadata = {
             "backup_name": backup_name,
             "created_at": datetime.now().isoformat(),
-            "version": "2.4.0",
+            "version": "2.4.1",
             "directories": dirs_to_backup,
             "total_users": len(load_users().get('users', {})),
             "total_conversions": load_conversions().get('stats', {}).get('total', 0)
@@ -522,56 +522,67 @@ def list_internal_media():
 
 def get_next_segment_number(playlist_dir, quality):
     """Obtém o próximo número de segmento para continuar a sequência"""
-    global global_segment_counter
-    
-    with segment_counter_lock:
-        try:
-            quality_dir = os.path.join(playlist_dir, quality)
-            if not os.path.exists(quality_dir):
-                os.makedirs(quality_dir, exist_ok=True)
-                return 1
-            
-            # Buscar o maior número de segmento existente
-            max_segment = 0
-            for filename in os.listdir(quality_dir):
-                if filename.startswith('segment_') and filename.endswith('.ts'):
-                    try:
-                        segment_num = int(filename[8:-3])  # Remove 'segment_' e '.ts'
-                        if segment_num > max_segment:
-                            max_segment = segment_num
-                    except:
-                        continue
-            
-            return max_segment + 1
-        except Exception as e:
-            print(f"Erro ao obter próximo segmento: {e}")
-            return global_segment_counter + 1
+    try:
+        quality_dir = os.path.join(playlist_dir, quality)
+        if not os.path.exists(quality_dir):
+            os.makedirs(quality_dir, exist_ok=True)
+            return 1
+        
+        # Buscar o maior número de segmento existente
+        max_segment = 0
+        for filename in os.listdir(quality_dir):
+            if filename.startswith('segment_') and filename.endswith('.ts'):
+                try:
+                    segment_num = int(filename[8:-3])  # Remove 'segment_' e '.ts'
+                    if segment_num > max_segment:
+                        max_segment = segment_num
+                except:
+                    continue
+        
+        return max_segment + 1
+    except Exception as e:
+        print(f"Erro ao obter próximo segmento: {e}")
+        return 1
 
-def update_global_segment_counter(new_value):
-    """Atualiza o contador global de segmentos"""
-    global global_segment_counter
-    with segment_counter_lock:
-        global_segment_counter = new_value
-    return global_segment_counter
+def get_total_segment_number(playlist_dir, quality):
+    """Obtém o número total de segmentos existentes"""
+    try:
+        quality_dir = os.path.join(playlist_dir, quality)
+        if not os.path.exists(quality_dir):
+            return 0
+        
+        # Contar segmentos
+        segment_count = 0
+        for filename in os.listdir(quality_dir):
+            if filename.startswith('segment_') and filename.endswith('.ts'):
+                segment_count += 1
+        
+        return segment_count
+    except Exception as e:
+        print(f"Erro ao contar segmentos: {e}")
+        return 0
 
 # =============== FUNÇÕES DE CONVERSÃO CORRIGIDAS ===============
-def convert_single_video(video_path, playlist_id, index, total_files, qualities, segment_start_number=1):
+def convert_single_video_to_shared_dir(video_path, playlist_id, index, total_files, qualities, segment_start_number=1):
     """
-    Converte um único vídeo para HLS - VERSÃO CORRIGIDA COM SEQUÊNCIA CONTINUADA
+    Converte um único vídeo para HLS - VERSÃO 2.4.1 COM DIRETÓRIO ÚNICO
+    Os segmentos de todos os vídeos vão para a mesma pasta por qualidade
     """
     ffmpeg_path = find_ffmpeg()
     if not ffmpeg_path:
         return None, "FFmpeg não encontrado"
     
     filename = os.path.basename(video_path)
-    video_id = f"{playlist_id}_{index:03d}"
-    output_dir = os.path.join(HLS_DIR, playlist_id, video_id)
-    os.makedirs(output_dir, exist_ok=True)
+    video_id = f"video_{index:03d}"
     
-    # Copiar arquivo original para subpasta original
-    original_dir = os.path.join(output_dir, "original")
+    # Criar diretório da playlist principal
+    playlist_dir = os.path.join(HLS_DIR, playlist_id)
+    os.makedirs(playlist_dir, exist_ok=True)
+    
+    # Copiar arquivo original para subpasta original (opcional)
+    original_dir = os.path.join(playlist_dir, "originals")
     os.makedirs(original_dir, exist_ok=True)
-    original_path = os.path.join(original_dir, filename)
+    original_path = os.path.join(original_dir, f"{video_id}_{filename}")
     
     try:
         shutil.copy2(video_path, original_path)
@@ -579,7 +590,7 @@ def convert_single_video(video_path, playlist_id, index, total_files, qualities,
         print(f"Erro ao copiar arquivo original: {e}")
         original_path = video_path  # Usar caminho original se não conseguir copiar
     
-    # Converter para cada qualidade
+    # Informações do vídeo
     video_info = {
         "id": video_id,
         "filename": filename,
@@ -588,11 +599,46 @@ def convert_single_video(video_path, playlist_id, index, total_files, qualities,
         "playlist_paths": {}
     }
     
+    # Obter duração do vídeo
+    try:
+        duration_cmd = [ffmpeg_path, '-i', original_path]
+        duration_result = subprocess.run(
+            duration_cmd, 
+            capture_output=True, 
+            text=True, 
+            stderr=subprocess.STDOUT,
+            timeout=10
+        )
+        for line in duration_result.stdout.split('\n'):
+            if 'Duration' in line:
+                duration_part = line.split('Duration:')[1].split(',')[0].strip()
+                h, m, s = duration_part.split(':')
+                video_info["duration"] = int(h) * 3600 + int(m) * 60 + float(s)
+                break
+    except Exception as e:
+        print(f"Erro ao obter duração: {e}")
+        # Estimar duração baseada no tamanho do arquivo
+        try:
+            file_size = os.path.getsize(original_path)
+            # Estimativa: 1MB por minuto para vídeo padrão
+            video_info["duration"] = (file_size / (1024 * 1024)) / 1.0 * 60
+        except:
+            video_info["duration"] = 60  # Valor padrão
+    
+    # Criar playlist individual para este vídeo (se necessário)
+    video_playlist_dir = os.path.join(playlist_dir, video_id)
+    os.makedirs(video_playlist_dir, exist_ok=True)
+    
     for quality in qualities:
-        quality_dir = os.path.join(output_dir, quality)
-        os.makedirs(quality_dir, exist_ok=True)
+        # Diretório de qualidade compartilhado (onde ficam os segmentos)
+        shared_quality_dir = os.path.join(playlist_dir, quality)
+        os.makedirs(shared_quality_dir, exist_ok=True)
         
-        m3u8_file = os.path.join(quality_dir, "index.m3u8")
+        # Diretório para playlist individual deste vídeo
+        video_quality_dir = os.path.join(video_playlist_dir, quality)
+        os.makedirs(video_quality_dir, exist_ok=True)
+        
+        m3u8_file = os.path.join(video_quality_dir, "index.m3u8")
         
         # Configurações por qualidade
         if quality == '240p':
@@ -618,35 +664,10 @@ def convert_single_video(video_path, playlist_id, index, total_files, qualities,
         else:
             continue
         
-        # Obter duração do vídeo
-        try:
-            duration_cmd = [ffmpeg_path, '-i', original_path]
-            duration_result = subprocess.run(
-                duration_cmd, 
-                capture_output=True, 
-                text=True, 
-                stderr=subprocess.STDOUT,
-                timeout=10
-            )
-            for line in duration_result.stdout.split('\n'):
-                if 'Duration' in line:
-                    duration_part = line.split('Duration:')[1].split(',')[0].strip()
-                    h, m, s = duration_part.split(':')
-                    video_info["duration"] = int(h) * 3600 + int(m) * 60 + float(s)
-                    break
-        except Exception as e:
-            print(f"Erro ao obter duração: {e}")
-            # Estimar duração baseada no tamanho do arquivo
-            try:
-                file_size = os.path.getsize(original_path)
-                # Estimativa: 1MB por minuto para vídeo padrão
-                video_info["duration"] = (file_size / (1024 * 1024)) / 1.0 * 60
-            except:
-                video_info["duration"] = 60  # Valor padrão
+        # Padrão para segmentos no diretório compartilhado
+        segment_pattern = os.path.join(shared_quality_dir, 'segment_%03d.ts')
         
-        # Comando FFmpeg CORRIGIDO com timeout infinito
-        segment_pattern = os.path.join(quality_dir, 'segment_%03d.ts')
-        
+        # Comando FFmpeg para gerar segmentos no diretório compartilhado
         cmd = [
             ffmpeg_path, '-i', original_path,
             '-vf', f'scale={scale},format=yuv420p',
@@ -685,12 +706,17 @@ def convert_single_video(video_path, playlist_id, index, total_files, qualities,
                 video_info["playlist_paths"][quality] = f"{playlist_id}/{video_id}/{quality}/index.m3u8"
                 
                 # Contar quantos segmentos foram gerados para este vídeo
-                segment_count = 0
-                for seg_file in os.listdir(quality_dir):
+                new_segments = 0
+                for seg_file in os.listdir(shared_quality_dir):
                     if seg_file.startswith('segment_') and seg_file.endswith('.ts'):
-                        segment_count += 1
+                        try:
+                            seg_num = int(seg_file[8:-3])
+                            if seg_num >= segment_start_number:
+                                new_segments += 1
+                        except:
+                            pass
                 
-                print(f"✅ {filename} convertido para {quality} com {segment_count} segmentos")
+                print(f"✅ {filename} convertido para {quality} com {new_segments} segmentos novos")
                     
             else:
                 error_msg = stderr[:500] if stderr else stdout[:500]
@@ -724,9 +750,9 @@ def convert_single_video(video_path, playlist_id, index, total_files, qualities,
     
     return video_info, None
 
-def create_master_playlist(playlist_id, videos_info, qualities, conversion_name):
+def create_master_playlist_v2(playlist_id, videos_info, qualities, conversion_name):
     """
-    Cria um master playlist M3U8 - VERSÃO CORRIGIDA
+    Cria um master playlist M3U8 - VERSÃO 2.4.1 COM DIRETÓRIO ÚNICO
     """
     playlist_dir = os.path.join(HLS_DIR, playlist_id)
     master_playlist = os.path.join(playlist_dir, "master.m3u8")
@@ -741,6 +767,7 @@ def create_master_playlist(playlist_id, videos_info, qualities, conversion_name)
         "videos": videos_info
     }
     
+    # Criar master playlist
     with open(master_playlist, 'w') as f:
         f.write("#EXTM3U\n")
         f.write("#EXT-X-VERSION:6\n")
@@ -774,27 +801,42 @@ def create_master_playlist(playlist_id, videos_info, qualities, conversion_name)
                 continue
             
             f.write(f'#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},RESOLUTION={resolution},CODECS="avc1.64001f,mp4a.40.2"\n')
-            f.write(f'{playlist_id}/{quality}/index.m3u8\n')
+            f.write(f'{playlist_id}/playlist_{quality}.m3u8\n')
     
-    # Criar variante playlists para cada qualidade
+    # Criar variante playlists para cada qualidade (com segmentos em diretório único)
     for quality in qualities:
-        quality_playlist_path = os.path.join(playlist_dir, quality, "index.m3u8")
-        os.makedirs(os.path.dirname(quality_playlist_path), exist_ok=True)
+        quality_playlist_path = os.path.join(playlist_dir, f"playlist_{quality}.m3u8")
         
         with open(quality_playlist_path, 'w') as qf:
             qf.write("#EXTM3U\n")
             qf.write("#EXT-X-VERSION:6\n")
             qf.write("#EXT-X-TARGETDURATION:10\n")
-            qf.write("#EXT-X-MEDIA-SEQUENCE:0\n")
+            qf.write("#EXT-X-MEDIA-SEQUENCE:1\n")
             qf.write("#EXT-X-PLAYLIST-TYPE:VOD\n")
             
-            # Para cada vídeo, adicionar sua playlist
+            segment_counter = 1
+            
+            # Para cada vídeo, adicionar seus segmentos
             for video_info in videos_info:
                 if quality in video_info.get("qualities", []):
-                    video_playlist_path = f"{video_info['id']}/{quality}/index.m3u8"
-                    qf.write(f'#EXT-X-DISCONTINUITY\n')
-                    qf.write(f'#EXTINF:{video_info.get("duration", 10):.6f},\n')
-                    qf.write(f'{video_playlist_path}\n')
+                    video_id = video_info["id"]
+                    
+                    # Ler a playlist individual deste vídeo
+                    video_playlist_path = os.path.join(playlist_dir, video_id, quality, "index.m3u8")
+                    
+                    if os.path.exists(video_playlist_path):
+                        qf.write(f'#EXT-X-DISCONTINUITY\n')
+                        qf.write(f'#EXTINF:{video_info.get("duration", 10):.6f},\n')
+                        
+                        # Adicionar segmentos deste vídeo
+                        with open(video_playlist_path, 'r') as vf:
+                            for line in vf:
+                                line = line.strip()
+                                if line and not line.startswith('#'):
+                                    # Atualizar caminho do segmento para o diretório compartilhado
+                                    qf.write(f'{playlist_id}/{quality}/{os.path.basename(line)}\n')
+                                    segment_counter += 1
+                    
                     playlist_info["total_duration"] += video_info.get("duration", 10)
             
             qf.write("#EXT-X-ENDLIST\n")
@@ -806,28 +848,30 @@ def create_master_playlist(playlist_id, videos_info, qualities, conversion_name)
     
     return master_playlist, playlist_info["total_duration"]
 
-def process_multiple_videos_from_paths(file_paths, qualities, playlist_id, conversion_name):
+def process_multiple_videos_to_single_dir(file_paths, qualities, playlist_id, conversion_name):
     """
-    Processa múltiplos vídeos a partir de caminhos de arquivo - VERSÃO CORRIGIDA
+    Processa múltiplos vídeos para DIRETÓRIO ÚNICO - VERSÃO 2.4.1
     """
     videos_info = []
     errors = []
     
     total_files = len(file_paths)
     
-    # Determinar número inicial de segmento
+    # Determinar número inicial de segmento baseado nos existentes
     segment_start_number = 1
-    if os.path.exists(os.path.join(HLS_DIR, playlist_id)):
+    playlist_dir = os.path.join(HLS_DIR, playlist_id)
+    
+    if os.path.exists(playlist_dir):
         # Verificar se já existem segmentos para continuar
         existing_qualities = []
         for quality in qualities:
-            quality_dir = os.path.join(HLS_DIR, playlist_id, quality)
+            quality_dir = os.path.join(playlist_dir, quality)
             if os.path.exists(quality_dir):
                 existing_qualities.append(quality)
         
         if existing_qualities:
             # Usar a primeira qualidade para determinar o próximo segmento
-            segment_start_number = get_next_segment_number(os.path.join(HLS_DIR, playlist_id), qualities[0])
+            segment_start_number = get_next_segment_number(playlist_dir, qualities[0])
             print(f"Continuando da posição de segmento: {segment_start_number}")
     
     for index, file_path in enumerate(file_paths, 1):
@@ -835,7 +879,7 @@ def process_multiple_videos_from_paths(file_paths, qualities, playlist_id, conve
         print(f"Processando arquivo {index}/{total_files}: {filename}")
         
         try:
-            video_info, error = convert_single_video(
+            video_info, error = convert_single_video_to_shared_dir(
                 file_path, 
                 playlist_id, 
                 index, 
@@ -847,7 +891,7 @@ def process_multiple_videos_from_paths(file_paths, qualities, playlist_id, conve
             if error:
                 errors.append(f"{filename}: {error}")
                 video_info = {
-                    "id": f"{playlist_id}_{index:03d}",
+                    "id": f"video_{index:03d}",
                     "filename": filename,
                     "qualities": [],
                     "error": error,
@@ -858,7 +902,13 @@ def process_multiple_videos_from_paths(file_paths, qualities, playlist_id, conve
             print(f"✅ Concluído: {filename} ({index}/{total_files})")
             
             # Atualizar número do próximo segmento para o próximo vídeo
-            segment_start_number = get_next_segment_number(os.path.join(HLS_DIR, playlist_id), qualities[0])
+            # Conta quantos segmentos foram gerados para este vídeo
+            if video_info.get("qualities"):
+                # Pega a primeira qualidade para contar
+                quality = qualities[0]
+                segment_count = get_total_segment_number(playlist_dir, quality)
+                segment_start_number = segment_count + 1
+                print(f"📊 Próximo vídeo começará do segmento: {segment_start_number}")
                 
         except Exception as e:
             error_msg = f"Erro ao processar {filename}: {str(e)}"
@@ -867,7 +917,7 @@ def process_multiple_videos_from_paths(file_paths, qualities, playlist_id, conve
             
             # Adicionar vídeo vazio para manter a ordem
             videos_info.append({
-                "id": f"{playlist_id}_{index:03d}",
+                "id": f"video_{index:03d}",
                 "filename": filename,
                 "qualities": [],
                 "error": error_msg,
@@ -878,7 +928,7 @@ def process_multiple_videos_from_paths(file_paths, qualities, playlist_id, conve
     videos_with_qualities = [v for v in videos_info if v.get("qualities")]
     
     if videos_with_qualities:
-        master_playlist, total_duration = create_master_playlist(playlist_id, videos_info, qualities, conversion_name)
+        master_playlist, total_duration = create_master_playlist_v2(playlist_id, videos_info, qualities, conversion_name)
         
         return {
             "success": True,
@@ -892,13 +942,13 @@ def process_multiple_videos_from_paths(file_paths, qualities, playlist_id, conve
             "videos_info": videos_info,
             "total_duration": total_duration,
             "qualities": [q for q in qualities if any(q in v.get("qualities", []) for v in videos_info)],
-            # Links corrigidos para cada qualidade
+            # Links para playlists de qualidade
             "quality_links": {
-                quality: f"/hls/{playlist_id}/{quality}/index.m3u8"
+                quality: f"/hls/{playlist_id}/playlist_{quality}.m3u8"
                 for quality in qualities
                 if any(quality in v.get("qualities", []) for v in videos_info)
             },
-            # Links para cada vídeo individual (se necessário)
+            # Links para playlists individuais (opcional)
             "video_links": [
                 {
                     "filename": v["filename"],
@@ -908,7 +958,13 @@ def process_multiple_videos_from_paths(file_paths, qualities, playlist_id, conve
                     }
                 }
                 for v in videos_info if v.get("qualities")
-            ]
+            ],
+            # Links para segmentos
+            "segment_dirs": {
+                quality: f"/hls/{playlist_id}/{quality}/"
+                for quality in qualities
+                if any(quality in v.get("qualities", []) for v in videos_info)
+            }
         }
     else:
         return {
@@ -1977,7 +2033,7 @@ DASHBOARD_HTML = '''
     <div class="header">
         <div class="logo">
             <i class="fas fa-video"></i>
-            <h1>HLS Converter ULTIMATE v2.4</h1>
+            <h1>HLS Converter ULTIMATE v2.4.1</h1>
         </div>
         <div class="user-info">
             <span><i class="fas fa-user"></i> {{ session.user_id }}</span>
@@ -2159,7 +2215,7 @@ DASHBOARD_HTML = '''
                     </label>
                     <label style="display: flex; align-items: center; gap: 10px;">
                         <input type="checkbox" id="continueSegments" checked>
-                        Continuar sequência de segmentos (para múltiplos vídeos)
+                        Continuar sequência de segmentos (todos os segmentos em uma pasta)
                     </label>
                 </div>
                 
@@ -3650,7 +3706,7 @@ def api_system_info():
         users = load_users()
         
         return jsonify({
-            "version": "2.4.0",
+            "version": "2.4.1",
             "base_dir": BASE_DIR,
             "users_count": len(users.get('users', {})),
             "service_status": "running",
@@ -3661,7 +3717,8 @@ def api_system_info():
             "backup_system": True,
             "named_conversions": True,
             "fixed_links": True,
-            "continue_segments": True
+            "continue_segments": True,
+            "single_directory": True  # Nova funcionalidade
         })
     except Exception as e:
         return jsonify({"error": str(e)})
@@ -3817,7 +3874,7 @@ def api_backup_delete_all():
 
 @app.route('/convert-multiple', methods=['POST'])
 def convert_multiple_videos():
-    """Converter múltiplos vídeos com nome personalizado - VERSÃO 2.4.0"""
+    """Converter múltiplos vídeos com diretório único - VERSÃO 2.4.1"""
     if 'user_id' not in session:
         return jsonify({"success": False, "error": "Não autenticado"}), 401
     
@@ -3914,11 +3971,11 @@ def convert_multiple_videos():
         if continue_segments:
             print(f"[INFO] Continuando sequência de segmentos para playlist: {playlist_id}")
         
-        print(f"Iniciando conversão: {len(file_paths)} arquivos, nome: {conversion_name}, continuar segmentos: {continue_segments}")
+        print(f"Iniciando conversão: {len(file_paths)} arquivos, nome: {conversion_name}, diretório único: SIM")
         
         # Processar em thread
         def conversion_task():
-            return process_multiple_videos_from_paths(file_paths, qualities, playlist_id, conversion_name)
+            return process_multiple_videos_to_single_dir(file_paths, qualities, playlist_id, conversion_name)
         
         future = executor.submit(conversion_task)
         result = future.result(timeout=None)  # TIMEOUT INFINITO
@@ -3975,8 +4032,9 @@ def convert_multiple_videos():
                 "player_url": f"/player/{playlist_id}",
                 "quality_links": result.get("quality_links", {}),
                 "video_links": result.get("video_links", []),
+                "segment_dirs": result.get("segment_dirs", {}),
                 "errors": result.get("errors", []),
-                "message": f"Conversão '{conversion_name}' concluída com sucesso!"
+                "message": f"Conversão '{conversion_name}' concluída com sucesso! (Segmentos em diretório único)"
             })
         else:
             conversions = load_conversions()
@@ -4047,7 +4105,7 @@ def convert_video():
         temp_path = os.path.join(UPLOAD_DIR, temp_filename)
         file.save(temp_path)
         
-        result = process_multiple_videos_from_paths([temp_path], qualities, playlist_id, conversion_name)
+        result = process_multiple_videos_to_single_dir([temp_path], qualities, playlist_id, conversion_name)
         
         # Limpar arquivo temporário
         try:
@@ -4113,6 +4171,7 @@ def convert_video():
 
 @app.route('/hls/<playlist_id>/master.m3u8')
 @app.route('/hls/<playlist_id>/<quality>/index.m3u8')
+@app.route('/hls/<playlist_id>/playlist_<quality>.m3u8')
 @app.route('/hls/<playlist_id>/<video_id>/<quality>/index.m3u8')
 @app.route('/hls/<playlist_id>/<path:filename>')
 def serve_hls(playlist_id, quality=None, video_id=None, filename=None):
@@ -4124,6 +4183,10 @@ def serve_hls(playlist_id, quality=None, video_id=None, filename=None):
         elif quality and not video_id:
             # URL: /hls/playlist_id/quality/index.m3u8
             filepath = os.path.join(HLS_DIR, playlist_id, quality, "index.m3u8")
+        elif quality and quality.startswith('playlist_'):
+            # URL: /hls/playlist_id/playlist_quality.m3u8
+            actual_quality = quality.replace('playlist_', '')
+            filepath = os.path.join(HLS_DIR, playlist_id, f"playlist_{actual_quality}.m3u8")
         else:
             # URL: /hls/playlist_id/master.m3u8
             filepath = os.path.join(HLS_DIR, playlist_id, "master.m3u8")
@@ -4292,7 +4355,7 @@ def health():
     return jsonify({
         "status": "healthy",
         "service": "hls-converter-ultimate",
-        "version": "2.4.0",
+        "version": "2.4.1",
         "features": {
             "ffmpeg": find_ffmpeg() is not None,
             "multi_upload": True,
@@ -4300,7 +4363,8 @@ def health():
             "backup_system": True,
             "named_conversions": True,
             "continue_segments": True,
-            "timeout_infinite": True
+            "timeout_infinite": True,
+            "single_directory": True  # Nova funcionalidade
         },
         "timestamp": datetime.now().isoformat()
     })
@@ -4308,7 +4372,7 @@ def health():
 # =============== INICIALIZAÇÃO ===============
 if __name__ == '__main__':
     print("=" * 70)
-    print("🚀 HLS Converter ULTIMATE - Versão 2.4.0")
+    print("🚀 HLS Converter ULTIMATE - Versão 2.4.1")
     print("=" * 70)
     print(f"📂 Diretório base: {BASE_DIR}")
     print(f"📁 Mídia interna: {INTERNAL_MEDIA_DIR}")
@@ -4317,6 +4381,7 @@ if __name__ == '__main__':
     print(f"💾 Sistema de backup: Habilitado")
     print(f"🏷️  Nome personalizado: Habilitado")
     print(f"🔄 Continuar segmentos: Habilitado")
+    print(f"📁 Diretório único: HABILITADO")
     print(f"⏱️  Timeout: INFINITO")
     print(f"🌐 Porta: 8080")
     print("=" * 70)
@@ -4390,8 +4455,8 @@ cat > /opt/hls-converter/db/conversions.json << 'EOF'
 }
 EOF
 
-# 11. CRIAR SCRIPT DE GERENCIAMENTO VERSÃO 2.4.0
-echo "📝 Criando script de gerenciamento v2.4.0..."
+# 11. CRIAR SCRIPT DE GERENCIAMENTO VERSÃO 2.4.1
+echo "📝 Criando script de gerenciamento v2.4.1..."
 
 cat > /usr/local/bin/hlsctl << 'EOF'
 #!/bin/bash
@@ -4400,7 +4465,7 @@ HLS_HOME="/opt/hls-converter"
 
 case "$1" in
     start)
-        echo "🚀 Iniciando HLS Converter v2.4.0..."
+        echo "🚀 Iniciando HLS Converter v2.4.1..."
         systemctl start hls-converter
         echo "✅ Serviço iniciado"
         ;;
@@ -4427,7 +4492,7 @@ case "$1" in
         fi
         ;;
     test)
-        echo "🧪 Testando sistema v2.4.0..."
+        echo "🧪 Testando sistema v2.4.1..."
         echo ""
         
         if systemctl is-active --quiet hls-converter; then
@@ -4584,7 +4649,7 @@ else:
 "
         ;;
     debug)
-        echo "🐛 Modo debug v2.4.0..."
+        echo "🐛 Modo debug v2.4.1..."
         cd /opt/hls-converter
         
         echo ""
@@ -4634,16 +4699,16 @@ else:
     info)
         IP=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "localhost")
         echo "=" * 70
-        echo "🎬 HLS Converter ULTIMATE v2.4.0 - Informações do Sistema"
+        echo "🎬 HLS Converter ULTIMATE v2.4.1 - Informações do Sistema"
         echo "=" * 70
         echo "Status: $(systemctl is-active hls-converter 2>/dev/null || echo 'inactive')"
-        echo "Versão: 2.4.0 (Completo com todos os recursos)"
+        echo "Versão: 2.4.1 (Completo com todos os recursos)"
         echo "Porta: 8080"
         echo "Login: http://$IP:8080/login"
         echo "Usuário: admin"
         echo "Senha: admin (altere no primeiro acesso)"
         echo ""
-        echo "✨ NOVAS FUNCIONALIDADES v2.4.0:"
+        echo "✨ NOVAS FUNCIONALIDADES v2.4.1:"
         echo "  ✅ Timeout infinito para conversões longas"
         echo "  ✅ Continuar sequência de segmentos para múltiplos vídeos"
         echo "  ✅ Seleção de arquivos internos do servidor"
@@ -4652,13 +4717,16 @@ else:
         echo "  ✅ Nome personalizado para conversões"
         echo "  ✅ Sistema de backup completo"
         echo "  ✅ Links corrigidos para cada qualidade"
+        echo "  ✅ DIRETÓRIO ÚNICO PARA SEGMENTOS"
         echo ""
-        echo "📂 DIRETÓRIOS:"
+        echo "📂 ESTRUTURA DE DIRETÓRIOS (NOVA):"
         echo "  📁 Principal: /opt/hls-converter"
         echo "  🎬 Mídia interna: /opt/hls-converter/internal_media"
         echo "  📤 Uploads: /opt/hls-converter/uploads"
         echo "  📥 HLS: /opt/hls-converter/hls"
         echo "  💾 Backups: /opt/hls-converter/backups"
+        echo "  🎯 Segmentos: /opt/hls-converter/hls/{playlist_id}/{240p,480p,720p,1080p}/"
+        echo "                 (todos os segmentos ficam nestas pastas, independente do vídeo)"
         echo ""
         echo "🔧 COMANDOS DISPONÍVEIS:"
         echo "  hlsctl start        - Iniciar serviço"
@@ -4679,7 +4747,7 @@ else:
         echo "=" * 70
         ;;
     *)
-        echo "🎬 HLS Converter ULTIMATE v2.4.0 - Gerenciador"
+        echo "🎬 HLS Converter ULTIMATE v2.4.1 - Gerenciador"
         echo "==================================================="
         echo ""
         echo "Uso: hlsctl [comando]"
@@ -4719,7 +4787,7 @@ echo "⚙️ Configurando serviço systemd..."
 
 cat > /etc/systemd/system/hls-converter.service << 'EOF'
 [Unit]
-Description=HLS Converter ULTIMATE v2.4.0 Service
+Description=HLS Converter ULTIMATE v2.4.1 Service
 After=network.target nginx.service
 Wants=network.target
 
@@ -4863,12 +4931,21 @@ Para listar mídia disponível via terminal:
 
 Para adicionar mídia via terminal:
   hlsctl add-media /caminho/para/video.mp4
+
+IMPORTANTE (v2.4.1):
+Todos os segmentos de todos os vídeos ficarão em uma mesma pasta por qualidade:
+  /opt/hls-converter/hls/{playlist_id}/240p/
+  /opt/hls-converter/hls/{playlist_id}/480p/
+  /opt/hls-converter/hls/{playlist_id}/720p/
+  /opt/hls-converter/hls/{playlist_id}/1080p/
+
+Isso garante que a sequência de segmentos seja contínua!
 EOF
 
 # 17. INFORMAÇÕES FINAIS
 echo ""
 echo "=" * 70
-echo "🎉🎉🎉 INSTALAÇÃO v2.4.0 COMPLETA! 🎉🎉🎉"
+echo "🎉🎉🎉 INSTALAÇÃO v2.4.1 COMPLETA! 🎉🎉🎉"
 echo "=" * 70
 echo ""
 echo "✅ TODAS AS MELHORIAS APLICADAS:"
@@ -4880,17 +4957,17 @@ echo "   ✅ Progresso em tempo real por arquivo"
 echo "   ✅ Nome personalizado para conversões"
 echo "   ✅ Sistema de backup completo"
 echo "   ✅ Links corrigidos para cada qualidade"
+echo "   ✅ DIRETÓRIO ÚNICO PARA SEGMENTOS (NOVO!)"
 echo ""
-echo "✨ NOVAS FUNCIONALIDADES:"
-echo "   1. Duas formas de seleção de vídeos:"
-echo "      📤 Upload de arquivos externos"
-echo "      📁 Seleção de arquivos internos"
-echo "   2. Conversão de múltiplos vídeos em sequência"
-echo "   3. Continuar numeração de segmentos"
-echo "   4. Timeout infinito para conversões longas"
-echo "   5. Progresso individual por vídeo"
-echo "   6. Interface com tabs para escolha"
-echo "   7. Nome personalizado para conversões"
+echo "✨ NOVAS FUNCIONALIDADES v2.4.1:"
+echo "   1. Diretório único para segmentos:"
+echo "      📁 /opt/hls-converter/hls/{playlist_id}/240p/"
+echo "      📁 /opt/hls-converter/hls/{playlist_id}/480p/"
+echo "      📁 /opt/hls-converter/hls/{playlist_id}/720p/"
+echo "      📁 /opt/hls-converter/hls/{playlist_id}/1080p/"
+echo "   2. Segmentos numerados continuamente: segment_001.ts, segment_002.ts, etc."
+echo "   3. Todos os vídeos compartilham os mesmos diretórios de qualidade"
+echo "   4. Playlists geradas automaticamente com referências corretas"
 echo ""
 echo "🔗 URLS DO SISTEMA:"
 echo "   🔐 Login:        http://$IP:8080/login"
@@ -4934,6 +5011,7 @@ echo "   2. Use a opção 'Continuar sequência de segmentos' para playlists"
 echo "   3. Verifique espaço em disco antes de converter"
 echo "   4. Monitore o progresso em tempo real"
 echo "   5. Use arquivos internos para vídeos grandes"
+echo "   6. Todos os segmentos ficam em pastas únicas por qualidade"
 echo ""
 echo "🆘 SUPORTE:"
 echo "   Se tiver problemas:"
@@ -4942,5 +5020,5 @@ echo "   2. Verifique logs: hlsctl logs -f"
 echo "   3. Teste FFmpeg: hlsctl fix-ffmpeg"
 echo ""
 echo "=" * 70
-echo "🚀 Sistema 100% funcional com todas as melhorias do código 1!"
+echo "🚀 Sistema 100% funcional com DIRETÓRIO ÚNICO para segmentos!"
 echo "=" * 70
