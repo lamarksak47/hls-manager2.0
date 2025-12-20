@@ -1,9 +1,9 @@
 #!/bin/bash
-# install_hls_converter_final_corrigido.sh - VERSÃO 2.4.1 COM DIRETÓRIO ÚNICO E M3U8 CORRETO
+# install_hls_converter_final_corrigido.sh - VERSÃO 2.5.0 COM ARQUIVOS ILIMITADOS E MONITORAMENTO DE DISCO
 
 set -e
 
-echo "🚀 INSTALANDO HLS CONVERTER ULTIMATE - VERSÃO 2.4.1"
+echo "🚀 INSTALANDO HLS CONVERTER ULTIMATE - VERSÃO 2.5.0"
 echo "=================================================================="
 
 # 1. Verificar privilégios
@@ -69,15 +69,15 @@ pip install \
     python-dotenv \
     werkzeug
 
-# 8. Configurar nginx COM TIMEOUTS INFINITOS
+# 8. Configurar nginx COM TIMEOUTS INFINITOS E LIMITE DE TAMANHO REMOVIDO
 echo "🌐 Configurando nginx..."
 cat > /etc/nginx/sites-available/hls-converter << 'EOF'
 server {
     listen 80;
     server_name _;
     
-    # Timeout INFINITO para conversões longas (50GB)
-    client_max_body_size 50G;
+    # Sem limite de tamanho para uploads grandes
+    client_max_body_size 0;
     client_body_timeout 0;
     client_header_timeout 0;
     keepalive_timeout 0;
@@ -146,14 +146,15 @@ ln -sf /etc/nginx/sites-available/hls-converter /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default
 systemctl restart nginx
 
-# 9. CRIAR APLICAÇÃO FLASK COMPLETA - VERSÃO 2.4.1 COM M3U8 CORRETO
-echo "💻 Criando aplicação Flask versão 2.4.1 com M3U8 correto..."
+# 9. CRIAR APLICAÇÃO FLASK COMPLETA - VERSÃO 2.5.0 COM ARQUIVOS ILIMITADOS E DISCO MONITOR
+echo "💻 Criando aplicação Flask versão 2.5.0..."
 
 cat > /opt/hls-converter/app.py << 'EOF'
 #!/usr/bin/env python3
 """
-HLS Converter ULTIMATE - Versão 2.4.1
+HLS Converter ULTIMATE - Versão 2.5.0
 Sistema completo com DIRETÓRIO ÚNICO para segmentos
+Com suporte a arquivos ilimitados e monitoramento de disco
 """
 
 import os
@@ -181,14 +182,15 @@ import concurrent.futures
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 CORS(app)
 
-# Configurações de segurança
+# Configurações de segurança - SEM LIMITE DE TAMANHO
 app.secret_key = secrets.token_hex(32)
 app.config['SESSION_TYPE'] = 'filesystem'
 app.config['SESSION_FILE_DIR'] = '/opt/hls-converter/sessions'
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=2)
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SECURE'] = False
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024 * 1024  # 50GB max upload
+# REMOVIDO O MAX_CONTENT_LENGTH para permitir arquivos ilimitados
+# app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024 * 1024  # REMOVIDO
 
 # Diretórios
 BASE_DIR = "/opt/hls-converter"
@@ -198,7 +200,7 @@ LOG_DIR = os.path.join(BASE_DIR, "logs")
 DB_DIR = os.path.join(BASE_DIR, "db")
 BACKUP_DIR = os.path.join(BASE_DIR, "backups")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-INTERNAL_MEDIA_DIR = os.path.join(BASE_DIR, "internal_media")  # Nova pasta para arquivos internos
+INTERNAL_MEDIA_DIR = os.path.join(BASE_DIR, "internal_media")
 USERS_FILE = os.path.join(DB_DIR, "users.json")
 CONVERSIONS_FILE = os.path.join(DB_DIR, "conversions.json")
 
@@ -346,6 +348,48 @@ def sanitize_filename(filename):
         filename = name[:95] + ext
     return filename.strip()
 
+def get_disk_usage():
+    """Obtém o uso de disco do diretório principal"""
+    try:
+        disk = psutil.disk_usage(BASE_DIR)
+        return {
+            "total": disk.total,
+            "used": disk.used,
+            "free": disk.free,
+            "percent": disk.percent
+        }
+    except Exception as e:
+        print(f"Erro ao obter uso de disco: {e}")
+        return {
+            "total": 0,
+            "used": 0,
+            "free": 0,
+            "percent": 0
+        }
+
+def get_disk_usage_all():
+    """Obtém o uso de disco de todas as partições"""
+    try:
+        partitions = []
+        for partition in psutil.disk_partitions():
+            try:
+                usage = psutil.disk_usage(partition.mountpoint)
+                partitions.append({
+                    "device": partition.device,
+                    "mountpoint": partition.mountpoint,
+                    "fstype": partition.fstype,
+                    "total": usage.total,
+                    "used": usage.used,
+                    "free": usage.free,
+                    "percent": usage.percent
+                })
+            except:
+                continue
+        return partitions
+    except Exception as e:
+        print(f"Erro ao obter partições: {e}")
+        return []
+
 def create_backup(backup_name=None):
     """Cria um backup completo do sistema"""
     try:
@@ -366,7 +410,7 @@ def create_backup(backup_name=None):
         metadata = {
             "backup_name": backup_name,
             "created_at": datetime.now().isoformat(),
-            "version": "2.4.1",
+            "version": "2.5.0",
             "directories": dirs_to_backup,
             "total_users": len(load_users().get('users', {})),
             "total_conversions": load_conversions().get('stats', {}).get('total', 0)
@@ -592,7 +636,7 @@ def convert_single_video_to_hls(video_path, playlist_id, index, total_files, qua
             capture_output=True, 
             text=True, 
             stderr=subprocess.STDOUT,
-            timeout=10
+            timeout=30
         )
         for line in duration_result.stdout.split('\n'):
             if 'Duration' in line:
@@ -802,16 +846,6 @@ def create_combined_playlist(playlist_id, quality, videos_info):
         f.write("#EXT-X-MEDIA-SEQUENCE:1\n")
         f.write("#EXT-X-PLAYLIST-TYPE:VOD\n")
         f.write("#EXT-X-INDEPENDENT-SEGMENTS\n")
-        
-        # Para cada vídeo, adicionar seus segmentos
-        for video_info in videos_info:
-            if quality in video_info.get("qualities", []):
-                f.write(f"#EXT-X-DISCONTINUITY\n")
-                f.write(f"#EXTINF:{video_info.get('duration', 10):.6f},\n")
-                
-                # Adicionar segmentos (simplificado - na prática, precisaríamos saber quais segmentos pertencem a cada vídeo)
-                # Por enquanto, apenas adiciona todos os segmentos em sequência
-                pass
         
         # Adicionar todos os segmentos em sequência
         for segment in segments:
@@ -1172,14 +1206,14 @@ CHANGE_PASSWORD_HTML = '''
 </html>
 '''
 
-# DASHBOARD HTML com a nova funcionalidade de importação interna
+# DASHBOARD HTML com monitoramento de disco
 DASHBOARD_HTML = '''
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🎬 HLS Converter ULTIMATE</title>
+    <title>🎬 HLS Converter ULTIMATE v2.5.0</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         :root {
@@ -1334,6 +1368,60 @@ DASHBOARD_HTML = '''
             display: flex;
             align-items: center;
             gap: 10px;
+        }
+        
+        /* Estilos para monitoramento de disco */
+        .disk-stats {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 12px;
+            margin-top: 20px;
+        }
+        
+        .disk-progress {
+            background: rgba(255,255,255,0.2);
+            border-radius: 10px;
+            height: 20px;
+            overflow: hidden;
+            margin: 15px 0;
+        }
+        
+        .disk-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #4cc9f0 0%, #4361ee 100%);
+            transition: width 0.5s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        
+        .disk-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .disk-item {
+            background: rgba(255,255,255,0.1);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .disk-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: white;
+        }
+        
+        .disk-label {
+            font-size: 0.9rem;
+            opacity: 0.9;
         }
         
         /* Novos estilos para importação */
@@ -1733,6 +1821,10 @@ DASHBOARD_HTML = '''
             .conversions-list {
                 grid-template-columns: 1fr;
             }
+            
+            .disk-info {
+                grid-template-columns: 1fr;
+            }
         }
         
         .toast {
@@ -2006,7 +2098,7 @@ DASHBOARD_HTML = '''
     <div class="header">
         <div class="logo">
             <i class="fas fa-video"></i>
-            <h1>HLS Converter ULTIMATE v2.4.1</h1>
+            <h1>HLS Converter ULTIMATE v2.5.0</h1>
         </div>
         <div class="user-info">
             <span><i class="fas fa-user"></i> {{ session.user_id }}</span>
@@ -2036,7 +2128,7 @@ DASHBOARD_HTML = '''
             </div>
         </div>
         
-        <!-- Dashboard Tab -->
+        <!-- Dashboard Tab COM DISCO -->
         <div id="dashboard" class="tab-content active">
             <div class="card">
                 <h2><i class="fas fa-tachometer-alt"></i> Status do Sistema</h2>
@@ -2058,11 +2150,47 @@ DASHBOARD_HTML = '''
                         <div class="stat-label">Conversões Bem-sucedidas</div>
                     </div>
                 </div>
-                
+            </div>
+            
+            <!-- Novo card para monitoramento de disco -->
+            <div class="card">
+                <h2><i class="fas fa-hdd"></i> Monitoramento de Disco</h2>
+                <div class="disk-stats">
+                    <h3 style="color: white; margin-bottom: 15px;">Uso de Armazenamento</h3>
+                    <div class="disk-progress">
+                        <div class="disk-progress-bar" id="diskProgressBar" style="width: 0%">0%</div>
+                    </div>
+                    <div class="disk-info">
+                        <div class="disk-item">
+                            <div class="disk-value" id="diskTotal">0 GB</div>
+                            <div class="disk-label">Capacidade Total</div>
+                        </div>
+                        <div class="disk-item">
+                            <div class="disk-value" id="diskUsed">0 GB</div>
+                            <div class="disk-label">Espaço Usado</div>
+                        </div>
+                        <div class="disk-item">
+                            <div class="disk-value" id="diskFree">0 GB</div>
+                            <div class="disk-label">Espaço Livre</div>
+                        </div>
+                        <div class="disk-item">
+                            <div class="disk-value" id="diskPercent">0%</div>
+                            <div class="disk-label">Percentual Usado</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2><i class="fas fa-microchip"></i> Status do FFmpeg</h2>
                 <div class="system-status">
-                    <h3><i class="fas fa-microchip"></i> Status do FFmpeg</h3>
                     <div id="ffmpegStatus" class="ffmpeg-status">Verificando...</div>
                     <p id="ffmpegPath" style="margin-top: 10px; font-size: 0.9rem;"></p>
+                    <div style="margin-top: 15px;">
+                        <button class="btn btn-success" onclick="testFFmpeg()">
+                            <i class="fas fa-video"></i> Testar FFmpeg
+                        </button>
+                    </div>
                 </div>
             </div>
             
@@ -2075,11 +2203,11 @@ DASHBOARD_HTML = '''
                     <button class="btn btn-success" onclick="refreshStats()">
                         <i class="fas fa-sync-alt"></i> Atualizar Status
                     </button>
-                    <button class="btn btn-warning" onclick="testFFmpeg()">
-                        <i class="fas fa-video"></i> Testar FFmpeg
-                    </button>
-                    <button class="btn btn-danger" onclick="cleanupFiles()">
+                    <button class="btn btn-warning" onclick="cleanupFiles()">
                         <i class="fas fa-trash"></i> Limpar Arquivos
+                    </button>
+                    <button class="btn btn-danger" onclick="checkDiskSpace()">
+                        <i class="fas fa-exclamation-triangle"></i> Verificar Espaço
                     </button>
                 </div>
             </div>
@@ -2090,7 +2218,8 @@ DASHBOARD_HTML = '''
             <div class="card">
                 <h2><i class="fas fa-upload"></i> Converter Múltiplos Vídeos para HLS</h2>
                 <p style="color: #666; margin-bottom: 20px;">
-                    Escolha como deseja importar os vídeos: por upload externo ou seleção interna.
+                    <strong>🎯 VERSÃO 2.5.0 - ARQUIVOS ILIMITADOS</strong><br>
+                    Agora você pode enviar arquivos de qualquer tamanho! Sem limites.
                 </p>
                 
                 <!-- Métodos de Importação -->
@@ -2129,7 +2258,8 @@ DASHBOARD_HTML = '''
                         <h3>Arraste e solte seus vídeos aqui</h3>
                         <p>ou clique para selecionar múltiplos arquivos (Ctrl + Click)</p>
                         <p style="color: #666; margin-top: 10px;">
-                            Formatos suportados: MP4, AVI, MOV, MKV, WEBM, FLV, WMV, M4V, MPG, MPEG
+                            <strong>Formatos suportados:</strong> MP4, AVI, MOV, MKV, WEBM, FLV, WMV, M4V, MPG, MPEG<br>
+                            <strong>Tamanho máximo:</strong> ILIMITADO! 🎉
                         </p>
                     </div>
                     
@@ -2192,9 +2322,20 @@ DASHBOARD_HTML = '''
                     </label>
                 </div>
                 
+                <!-- Verificação de espaço em disco -->
+                <div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 10px; border-left: 4px solid #f39c12;">
+                    <h4><i class="fas fa-hdd"></i> Verificação de Espaço em Disco</h4>
+                    <p style="color: #666; margin: 10px 0;">
+                        Espaço disponível: <span id="availableSpace">Calculando...</span>
+                    </p>
+                    <button class="btn btn-warning" onclick="checkDiskSpace()">
+                        <i class="fas fa-sync-alt"></i> Verificar Espaço
+                    </button>
+                </div>
+                
                 <!-- Botão de conversão -->
                 <button class="btn btn-primary" onclick="startConversion()" id="convertBtn" style="margin-top: 30px; width: 100%;">
-                    <i class="fas fa-play-circle"></i> Iniciar Conversão em Lote
+                    <i class="fas fa-play-circle"></i> Iniciar Conversão em Lote (Arquivos Ilimitados)
                 </button>
                 
                 <!-- Detalhes do processamento -->
@@ -2400,6 +2541,7 @@ DASHBOARD_HTML = '''
             switch(tabName) {
                 case 'dashboard':
                     loadSystemStats();
+                    loadDiskUsage();
                     break;
                 case 'upload':
                     if (currentImportMethod === 'internal') {
@@ -2608,6 +2750,73 @@ DASHBOARD_HTML = '''
             updateInternalSelectedList();
         }
         
+        // =============== MONITORAMENTO DE DISCO ===============
+        function loadDiskUsage() {
+            fetch('/api/disk-usage')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.main) {
+                        const disk = data.main;
+                        const progressBar = document.getElementById('diskProgressBar');
+                        const percent = disk.percent || 0;
+                        
+                        progressBar.style.width = `${percent}%`;
+                        progressBar.textContent = `${percent}%`;
+                        
+                        document.getElementById('diskTotal').textContent = formatBytes(disk.total);
+                        document.getElementById('diskUsed').textContent = formatBytes(disk.used);
+                        document.getElementById('diskFree').textContent = formatBytes(disk.free);
+                        document.getElementById('diskPercent').textContent = `${percent}%`;
+                        
+                        // Atualizar espaço disponível na aba upload
+                        const freeGB = (disk.free / (1024 * 1024 * 1024)).toFixed(1);
+                        document.getElementById('availableSpace').textContent = `${freeGB} GB disponíveis`;
+                        
+                        // Aviso se espaço estiver baixo
+                        if (percent > 90) {
+                            document.getElementById('availableSpace').innerHTML = 
+                                `<span style="color: #e74c3c; font-weight: bold;">⚠️ ${freeGB} GB (CRÍTICO!)</span>`;
+                        } else if (percent > 80) {
+                            document.getElementById('availableSpace').innerHTML = 
+                                `<span style="color: #f39c12; font-weight: bold;">⚠️ ${freeGB} GB (BAIXO)</span>`;
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Erro ao carregar uso de disco:', error);
+                });
+        }
+        
+        function checkDiskSpace() {
+            loadDiskUsage();
+            
+            fetch('/api/disk-usage')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.main) {
+                        const disk = data.main;
+                        const percent = disk.percent || 0;
+                        const freeGB = (disk.free / (1024 * 1024 * 1024)).toFixed(1);
+                        
+                        let message = `💾 Espaço em disco: ${percent}% usado, ${freeGB} GB livres`;
+                        let type = 'info';
+                        
+                        if (percent > 90) {
+                            message = `⚠️ DISCO QUASE CHEIO! ${percent}% usado, apenas ${freeGB} GB livres!`;
+                            type = 'error';
+                        } else if (percent > 80) {
+                            message = `⚠️ Espaço em disco baixo: ${percent}% usado, ${freeGB} GB livres`;
+                            type = 'warning';
+                        }
+                        
+                        showToast(message, type);
+                    }
+                })
+                .catch(error => {
+                    showToast('Erro ao verificar espaço em disco', 'error');
+                });
+        }
+        
         // =============== FUNÇÕES COMUNS ===============
         function toggleQuality(element) {
             const quality = element.getAttribute('data-quality');
@@ -2655,6 +2864,26 @@ DASHBOARD_HTML = '''
                 return;
             }
             
+            // Verificar espaço em disco antes de iniciar
+            fetch('/api/disk-usage')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.main && data.main.percent > 95) {
+                        const confirm = window.confirm(
+                            `⚠️ ATENÇÃO: Disco está ${data.main.percent}% cheio! ` +
+                            `Continuar pode causar falhas. Deseja prosseguir mesmo assim?`
+                        );
+                        if (!confirm) return;
+                    }
+                    
+                    proceedWithConversion(conversionName, filesToConvert);
+                })
+                .catch(() => {
+                    proceedWithConversion(conversionName, filesToConvert);
+                });
+        }
+        
+        function proceedWithConversion(conversionName, filesToConvert) {
             const formData = new FormData();
             
             if (currentImportMethod === 'external') {
@@ -2746,6 +2975,7 @@ DASHBOARD_HTML = '''
                         // Atualizar histórico
                         loadConversions();
                         loadSystemStats();
+                        loadDiskUsage();
                     }, 5000);
                 } else {
                     const errorMsg = data.error || 'Erro desconhecido na conversão';
@@ -2893,6 +3123,7 @@ DASHBOARD_HTML = '''
         
         function refreshStats() {
             loadSystemStats();
+            loadDiskUsage();
             showToast('Status atualizado com sucesso', 'success');
         }
         
@@ -3025,6 +3256,7 @@ DASHBOARD_HTML = '''
                     .then(data => {
                         if (data.success) {
                             showToast(`✅ ${data.message}`, 'success');
+                            loadDiskUsage();
                         } else {
                             showToast(`❌ Erro: ${data.error}`, 'error');
                         }
@@ -3041,6 +3273,7 @@ DASHBOARD_HTML = '''
                     .then(response => response.json())
                     .then(data => {
                         showToast(data.message || '✅ Arquivos antigos removidos', 'success');
+                        loadDiskUsage();
                     })
                     .catch(() => {
                         showToast('❌ Erro ao limpar arquivos antigos', 'error');
@@ -3059,7 +3292,8 @@ DASHBOARD_HTML = '''
                         <p><strong>Usuários:</strong> ${data.users_count || 0}</p>
                         <p><strong>Serviço:</strong> ${data.service_status || 'N/A'}</p>
                         <p><strong>Uptime:</strong> ${data.uptime || 'N/A'}</p>
-                        <p><strong>Backup:</strong> ${data.backup_enabled ? 'Habilitado' : 'Desabilitado'}</p>
+                        <p><strong>Upload Ilimitado:</strong> ✅ Habilitado</p>
+                        <p><strong>Monitoramento de Disco:</strong> ✅ Habilitado</p>
                     `;
                 })
                 .catch(error => {
@@ -3081,6 +3315,7 @@ DASHBOARD_HTML = '''
                         showToast(`✅ Backup criado: ${data.backup_name} (${formatBytes(data.size)})`, 'success');
                         document.getElementById('backupName').value = '';
                         loadBackups();
+                        loadDiskUsage();
                     } else {
                         showToast(`❌ Erro: ${data.error}`, 'error');
                     }
@@ -3170,6 +3405,7 @@ DASHBOARD_HTML = '''
                         if (data.success) {
                             showToast('✅ Backup excluído', 'success');
                             loadBackups();
+                            loadDiskUsage();
                         } else {
                             showToast(`❌ Erro: ${data.error}`, 'error');
                         }
@@ -3188,6 +3424,7 @@ DASHBOARD_HTML = '''
                         if (data.success) {
                             showToast(`✅ ${data.deleted} backups excluídos`, 'success');
                             loadBackups();
+                            loadDiskUsage();
                         } else {
                             showToast(`❌ Erro: ${data.error}`, 'error');
                         }
@@ -3266,7 +3503,7 @@ DASHBOARD_HTML = '''
         function formatBytes(bytes) {
             if (bytes === 0) return '0 Bytes';
             const k = 1024;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
             const i = Math.floor(Math.log(bytes) / Math.log(k));
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
@@ -3302,9 +3539,11 @@ DASHBOARD_HTML = '''
         // =============== INICIALIZAÇÃO ===============
         document.addEventListener('DOMContentLoaded', function() {
             loadSystemStats();
+            loadDiskUsage();
             
             // Atualizar stats a cada 30 segundos
             setInterval(loadSystemStats, 30000);
+            setInterval(loadDiskUsage, 60000);
             
             // Configurar drag and drop para upload externo
             const uploadArea = document.querySelector('#externalUpload .upload-area');
@@ -3497,6 +3736,25 @@ def api_system():
             "ffmpeg_status": "error"
         })
 
+@app.route('/api/disk-usage')
+def api_disk_usage():
+    """Endpoint para uso de disco"""
+    try:
+        main_disk = get_disk_usage()
+        all_disks = get_disk_usage_all()
+        
+        return jsonify({
+            "success": True,
+            "main": main_disk,
+            "partitions": all_disks,
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
+
 @app.route('/api/internal-media')
 def api_internal_media():
     """Endpoint para listar arquivos de mídia internos"""
@@ -3678,7 +3936,7 @@ def api_system_info():
         users = load_users()
         
         return jsonify({
-            "version": "2.4.1",
+            "version": "2.5.0",
             "base_dir": BASE_DIR,
             "users_count": len(users.get('users', {})),
             "service_status": "running",
@@ -3691,7 +3949,9 @@ def api_system_info():
             "fixed_links": True,
             "continue_segments": True,
             "single_directory": True,
-            "correct_m3u8_location": True  # Nova funcionalidade
+            "correct_m3u8_location": True,
+            "unlimited_uploads": True,
+            "disk_monitoring": True
         })
     except Exception as e:
         return jsonify({"error": str(e)})
@@ -3842,10 +4102,10 @@ def api_backup_delete_all():
             "error": str(e)
         })
 
-# =============== ROTA DE CONVERSÃO SIMPLIFICADA ===============
+# =============== ROTA DE CONVERSÃO COM ARQUIVOS ILIMITADOS ===============
 @app.route('/convert-multiple', methods=['POST'])
 def convert_multiple_videos():
-    """Converter múltiplos vídeos - VERSÃO SIMPLIFICADA"""
+    """Converter múltiplos vídeos - VERSÃO COM ARQUIVOS ILIMITADOS"""
     if 'user_id' not in session:
         return jsonify({"success": False, "error": "Não autenticado"}), 401
     
@@ -3894,6 +4154,17 @@ def convert_multiple_videos():
             # Salvar arquivos temporariamente e obter seus caminhos
             for file in files:
                 if file.filename:
+                    # Verificar espaço em disco antes de salvar
+                    disk_usage = get_disk_usage()
+                    file_size = len(file.read())
+                    file.seek(0)  # Voltar ao início do arquivo
+                    
+                    if disk_usage['free'] < file_size * 2:  # Precisa de espaço para o arquivo + conversão
+                        return jsonify({
+                            "success": False,
+                            "error": f"Espaço em disco insuficiente para processar {file.filename}. Espaço livre: {format_bytes(disk_usage['free'])}"
+                        })
+                    
                     temp_filename = f"{uuid.uuid4().hex}_{file.filename}"
                     temp_path = os.path.join(UPLOAD_DIR, temp_filename)
                     file.save(temp_path)
@@ -3927,6 +4198,24 @@ def convert_multiple_videos():
             return jsonify({"success": False, "error": "Nenhum arquivo válido para converter"})
         
         print(f"[DEBUG] Total de arquivos para converter: {len(file_paths)}")
+        
+        # Calcular espaço necessário aproximado
+        total_size = 0
+        for path in file_paths:
+            try:
+                total_size += os.path.getsize(path)
+            except:
+                pass
+        
+        disk_usage = get_disk_usage()
+        # Estimativa: precisamos de espaço para os arquivos originais + conversões (3x o tamanho original)
+        estimated_needed = total_size * 3
+        
+        if disk_usage['free'] < estimated_needed:
+            return jsonify({
+                "success": False,
+                "error": f"Espaço em disco insuficiente. Necessário: ~{format_bytes(estimated_needed)}, Disponível: {format_bytes(disk_usage['free'])}"
+            })
         
         # Ordenar arquivos se solicitado
         if request.form.get('keep_order', 'true') == 'true':
@@ -4038,6 +4327,14 @@ def convert_multiple_videos():
             "success": False,
             "error": f"Erro interno: {str(e)}"
         })
+
+def format_bytes(bytes_num):
+    """Formata bytes para string legível"""
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        if bytes_num < 1024.0:
+            return f"{bytes_num:.2f} {unit}"
+        bytes_num /= 1024.0
+    return f"{bytes_num:.2f} PB"
 
 @app.route('/convert', methods=['POST'])
 def convert_video():
@@ -4259,7 +4556,7 @@ def health():
     return jsonify({
         "status": "healthy",
         "service": "hls-converter-ultimate",
-        "version": "2.4.1",
+        "version": "2.5.0",
         "features": {
             "ffmpeg": find_ffmpeg() is not None,
             "multi_upload": True,
@@ -4270,15 +4567,18 @@ def health():
             "timeout_infinite": True,
             "single_directory": True,
             "correct_m3u8_location": True,
-            "simple_conversion": True
+            "simple_conversion": True,
+            "unlimited_uploads": True,
+            "disk_monitoring": True
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        "disk_usage": get_disk_usage()
     })
 
 # =============== INICIALIZAÇÃO ===============
 if __name__ == '__main__':
     print("=" * 70)
-    print("🚀 HLS Converter ULTIMATE - Versão 2.4.1 SIMPLIFICADA")
+    print("🚀 HLS Converter ULTIMATE - Versão 2.5.0")
     print("=" * 70)
     print(f"📂 Diretório base: {BASE_DIR}")
     print(f"📁 Mídia interna: {INTERNAL_MEDIA_DIR}")
@@ -4289,6 +4589,8 @@ if __name__ == '__main__':
     print(f"🔄 Continuar segmentos: Habilitado")
     print(f"📁 Estrutura simples: HABILITADA")
     print(f"📝 index.m3u8 nas pastas de qualidade: SIM")
+    print(f"🎯 ARQUIVOS ILIMITADOS: SIM")
+    print(f"💽 MONITORAMENTO DE DISCO: SIM")
     print(f"⏱️  Timeout: INFINITO")
     print(f"🌐 Porta: 8080")
     print("=" * 70)
@@ -4306,6 +4608,11 @@ if __name__ == '__main__':
     else:
         print("❌ FFmpeg NÃO encontrado!")
         print("📋 Execute: sudo apt-get install -y ffmpeg")
+    
+    # Verificar espaço em disco
+    disk_usage = get_disk_usage()
+    print(f"💽 Uso de disco: {disk_usage['percent']}%")
+    print(f"💽 Livre: {format_bytes(disk_usage['free'])} de {format_bytes(disk_usage['total'])}")
     
     print("")
     print("🌐 URLs importantes:")
@@ -4364,7 +4671,7 @@ cat > /opt/hls-converter/db/conversions.json << 'EOF'
 }
 EOF
 
-# 11. CRIAR SCRIPT DE GERENCIAMENTO VERSÃO SIMPLIFICADA
+# 11. CRIAR SCRIPT DE GERENCIAMENTO VERSÃO 2.5.0
 echo "📝 Criando script de gerenciamento..."
 
 cat > /usr/local/bin/hlsctl << 'EOF'
@@ -4374,7 +4681,7 @@ HLS_HOME="/opt/hls-converter"
 
 case "$1" in
     start)
-        echo "🚀 Iniciando HLS Converter v2.4.1 simplificado..."
+        echo "🚀 Iniciando HLS Converter v2.5.0..."
         systemctl start hls-converter
         echo "✅ Serviço iniciado"
         ;;
@@ -4401,7 +4708,7 @@ case "$1" in
         fi
         ;;
     test)
-        echo "🧪 Testando sistema v2.4.1 simplificado..."
+        echo "🧪 Testando sistema v2.5.0..."
         echo ""
         
         if systemctl is-active --quiet hls-converter; then
@@ -4413,6 +4720,13 @@ case "$1" in
             else
                 echo "⚠️  Health check falhou"
                 curl -s http://localhost:8080/health || true
+            fi
+            
+            echo "💽 Testando monitoramento de disco..."
+            if curl -s http://localhost:8080/api/disk-usage | grep -q '"success":true'; then
+                echo "✅ Monitoramento de disco OK"
+            else
+                echo "⚠️  Monitoramento de disco falhou"
             fi
             
         else
@@ -4437,6 +4751,10 @@ case "$1" in
                 echo "❌ $dir (não existe)"
             fi
         done
+        
+        echo ""
+        echo "💽 Verificando espaço em disco..."
+        df -h "$HLS_HOME" | tail -1
         ;;
     fix-ffmpeg)
         echo "🔧 Instalando FFmpeg..."
@@ -4480,6 +4798,18 @@ case "$1" in
         find /opt/hls-converter/hls -type d -mtime +7 -exec rm -rf {} \; 2>/dev/null || true
         echo "✅ Arquivos antigos removidos"
         ;;
+    disk-space)
+        echo "💽 Espaço em disco:"
+        echo ""
+        echo "Diretório principal: $HLS_HOME"
+        df -h "$HLS_HOME"
+        echo ""
+        echo "📊 Uso detalhado:"
+        find "$HLS_HOME" -type d -name "hls" -o -name "uploads" -o -name "internal_media" -o -name "backups" | while read dir; do
+            size=$(du -sh "$dir" 2>/dev/null || echo "0")
+            echo "  $dir: $size"
+        done
+        ;;
     reset-password)
         echo "🔑 Resetando senha do admin para 'admin'..."
         cd /opt/hls-converter
@@ -4499,7 +4829,7 @@ print('⚠️  Altere a senha no primeiro login!')
 "
         ;;
     debug)
-        echo "🐛 Modo debug v2.4.1 simplificado..."
+        echo "🐛 Modo debug v2.5.0..."
         cd /opt/hls-converter
         
         echo ""
@@ -4532,6 +4862,10 @@ print('⚠️  Altere a senha no primeiro login!')
         curl -s http://localhost:8080/health | jq . 2>/dev/null || curl -s http://localhost:8080/health
         
         echo ""
+        echo "💽 Uso de disco:"
+        curl -s http://localhost:8080/api/disk-usage | jq . 2>/dev/null || curl -s http://localhost:8080/api/disk-usage
+        
+        echo ""
         echo "🎬 Mídia interna via API:"
         curl -s http://localhost:8080/api/internal-media | jq . 2>/dev/null || curl -s http://localhost:8080/api/internal-media
         
@@ -4554,21 +4888,26 @@ print('⚠️  Altere a senha no primeiro login!')
         echo ""
         echo "🔑 Banco de dados:"
         ls -la /opt/hls-converter/db/
+        
+        echo ""
+        echo "📊 Configuração do nginx:"
+        grep -A5 "client_max_body_size" /etc/nginx/sites-available/hls-converter || echo "Config não encontrada"
         ;;
     info)
         IP=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "localhost")
         echo "=" * 70
-        echo "🎬 HLS Converter ULTIMATE v2.4.1 SIMPLIFICADO"
+        echo "🎬 HLS Converter ULTIMATE v2.5.0"
         echo "=" * 70
         echo "Status: $(systemctl is-active hls-converter 2>/dev/null || echo 'inactive')"
-        echo "Versão: 2.4.1 (Simplificado e funcional)"
+        echo "Versão: 2.5.0 (Arquivos ilimitados + Monitoramento de disco)"
         echo "Porta: 8080"
         echo "Login: http://$IP:8080/login"
         echo "Usuário: admin"
         echo "Senha: admin (altere no primeiro acesso)"
         echo ""
-        echo "✨ CARACTERÍSTICAS:"
-        echo "  ✅ Conversão simples e direta"
+        echo "✨ NOVAS CARACTERÍSTICAS:"
+        echo "  ✅ ARQUIVOS ILIMITADOS - Sem limite de tamanho!"
+        echo "  ✅ MONITORAMENTO DE DISCO - Veja o uso em tempo real"
         echo "  ✅ index.m3u8 criado nas pastas de qualidade"
         echo "  ✅ Master playlist referenciando as qualidades"
         echo "  ✅ Timeout infinito para conversões longas"
@@ -4597,13 +4936,14 @@ print('⚠️  Altere a senha no primeiro login!')
         echo "  hlsctl fix-ffmpeg   - Instalar/reparar FFmpeg"
         echo "  hlsctl add-media FILE - Adicionar mídia"
         echo "  hlsctl list-media   - Listar mídia"
+        echo "  hlsctl disk-space   - Ver espaço em disco"
         echo "  hlsctl cleanup      - Limpar arquivos"
         echo "  hlsctl reset-password - Resetar senha"
         echo "  hlsctl info         - Esta informação"
         echo "=" * 70
         ;;
     *)
-        echo "🎬 HLS Converter ULTIMATE v2.4.1 - Gerenciador"
+        echo "🎬 HLS Converter ULTIMATE v2.5.0 - Gerenciador"
         echo "==================================================="
         echo ""
         echo "Uso: hlsctl [comando]"
@@ -4619,6 +4959,7 @@ print('⚠️  Altere a senha no primeiro login!')
         echo "  fix-ffmpeg          - Instalar/reparar FFmpeg"
         echo "  add-media FILE      - Adicionar mídia"
         echo "  list-media          - Listar mídia"
+        echo "  disk-space          - Ver espaço em disco"
         echo "  cleanup             - Limpar arquivos"
         echo "  reset-password      - Resetar senha do admin"
         echo "  info                - Informações do sistema"
@@ -4627,6 +4968,7 @@ print('⚠️  Altere a senha no primeiro login!')
         echo "  hlsctl start"
         echo "  hlsctl add-media /home/usuario/video.mp4"
         echo "  hlsctl list-media"
+        echo "  hlsctl disk-space"
         echo "  hlsctl test"
         echo "  hlsctl debug"
         ;;
@@ -4638,7 +4980,7 @@ echo "⚙️ Configurando serviço systemd..."
 
 cat > /etc/systemd/system/hls-converter.service << 'EOF'
 [Unit]
-Description=HLS Converter ULTIMATE v2.4.1 Service
+Description=HLS Converter ULTIMATE v2.5.0 Service
 After=network.target nginx.service
 Wants=network.target
 
@@ -4726,6 +5068,15 @@ if systemctl is-active --quiet hls-converter.service; then
         timeout 3 curl -s http://localhost:8080/health || echo "Timeout ou erro"
     fi
     
+    echo "💽 Testando monitoramento de disco..."
+    if timeout 5 curl -s http://localhost:8080/api/disk-usage | grep -q '"success":true'; then
+        echo "✅ Monitoramento de disco: OK"
+        # Mostrar uso de disco
+        curl -s http://localhost:8080/api/disk-usage | jq -r '.main | "  Uso: \(.percent)% | Livre: \(.free/1024/1024/1024 | floor)GB de \(.total/1024/1024/1024 | floor)GB"' 2>/dev/null || echo "  Não foi possível obter detalhes"
+    else
+        echo "⚠️  Monitoramento de disco: Pode ter problemas"
+    fi
+    
     echo "🎬 Testando API de mídia interna..."
     if timeout 5 curl -s http://localhost:8080/api/internal-media | grep -q '"success":true'; then
         echo "✅ API de mídia interna: OK"
@@ -4748,6 +5099,16 @@ if systemctl is-active --quiet hls-converter.service; then
         echo "❌ FFmpeg não encontrado"
     fi
     
+    echo ""
+    echo "🔧 Testando configuração do nginx..."
+    NGINX_CONFIG=$(grep "client_max_body_size" /etc/nginx/sites-available/hls-converter)
+    if echo "$NGINX_CONFIG" | grep -q "client_max_body_size 0"; then
+        echo "✅ Nginx configurado para arquivos ILIMITADOS"
+    else
+        echo "⚠️  Nginx pode ter limite de upload"
+        echo "   Config: $NGINX_CONFIG"
+    fi
+    
 else
     echo "❌ Serviço não está ativo"
     echo ""
@@ -4758,11 +5119,12 @@ fi
 # 16. INFORMAÇÕES FINAIS
 echo ""
 echo "=" * 70
-echo "🎉🎉🎉 INSTALAÇÃO v2.4.1 SIMPLIFICADA COMPLETA! 🎉🎉🎉"
+echo "🎉🎉🎉 INSTALAÇÃO v2.5.0 COMPLETA! 🎉🎉🎉"
 echo "=" * 70
 echo ""
-echo "✅ CARACTERÍSTICAS PRINCIPAIS:"
-echo "   ✅ Conversão simples e direta"
+echo "✅ NOVAS CARACTERÍSTICAS:"
+echo "   ✅ ARQUIVOS ILIMITADOS - Sem limite de tamanho!"
+echo "   ✅ MONITORAMENTO DE DISCO - Veja o uso em tempo real"
 echo "   ✅ index.m3u8 criado NAS PASTAS DE QUALIDADE"
 echo "   ✅ Master playlist referenciando as qualidades"
 echo "   ✅ Timeout infinito para conversões longas"
@@ -4786,6 +5148,9 @@ echo "📂 ADICIONAR MÍDIA:"
 echo "   sudo cp video.mp4 /opt/hls-converter/internal_media/"
 echo "   hlsctl add-media /caminho/para/video.mp4"
 echo ""
+echo "💽 VERIFICAR ESPAÇO EM DISCO:"
+echo "   hlsctl disk-space"
+echo ""
 echo "⚙️  COMANDOS DE GERENCIAMENTO:"
 echo "   • hlsctl start        - Iniciar serviço"
 echo "   • hlsctl stop         - Parar serviço"
@@ -4797,13 +5162,20 @@ echo "   • hlsctl debug        - Modo debug"
 echo "   • hlsctl fix-ffmpeg   - Instalar/reparar FFmpeg"
 echo "   • hlsctl add-media    - Adicionar mídia"
 echo "   • hlsctl list-media   - Listar mídia"
+echo "   • hlsctl disk-space   - Ver espaço em disco"
 echo ""
 echo "💡 DICAS:"
 echo "   1. Adicione vídeos ao diretório interno"
 echo "   2. Use a interface web para converter"
 echo "   3. Verifique os arquivos index.m3u8 nas pastas de qualidade"
 echo "   4. Use o player integrado para testar"
+echo "   5. Monitore o espaço em disco no dashboard"
+echo ""
+echo "⚠️  IMPORTANTE:"
+echo "   - Arquivos grandes podem demorar para converter"
+echo "   - Espaço em disco será consumido pelos arquivos convertidos"
+echo "   - Use 'hlsctl disk-space' para monitorar"
 echo ""
 echo "=" * 70
-echo "🚀 Sistema pronto para uso com M3U8 CORRETO!"
+echo "🚀 Sistema pronto para uso com ARQUIVOS ILIMITADOS!"
 echo "=" * 70
