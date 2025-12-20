@@ -13,3 +13,11 @@ APÓS INSTALAÇÃO
 chmod +x fix_login_issue.sh
 
 sudo ./fix_login_issue.sh
+
+PARA DESISTALAR
+
+chmod +x uninstall_hls_converter.sh
+
+sudo ./uninstall_hls_converter.sh
+
+OBS. LEIA COM ATENÇÃO!!!
